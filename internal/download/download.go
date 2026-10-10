@@ -2,6 +2,7 @@ package download
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -41,6 +42,7 @@ type Download struct {
 	done            chan struct{}
 	doneOnce        sync.Once
 	tracker         *tracker.Tracker
+	destination     string
 	files           []*fileState
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -75,11 +77,11 @@ func New(t *torrent.Torrent, c *config.Config) *Download {
 	}
 }
 
-func createFileFromPath(root string, path []string) (*os.File, error) {
+func createFileFromPath(destination string, path []string) (*os.File, error) {
 	if len(path) == 0 {
 		return nil, fmt.Errorf("path must not be empty")
 	}
-	current := root
+	current := destination
 	for i, p := range path {
 		if current == "" {
 			current = p
@@ -106,17 +108,22 @@ func (d *Download) Start(trackerURL string) error {
 		announceList = [][]string{{trackerURL}}
 	}
 
-	parentFolder := ""
+	destination, err := os.Getwd()
+	if err != nil {
+		return err
+	}
 	if len(d.torrent.Files) > 1 {
 		if err := os.Mkdir(d.torrent.Name, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
 			return err
 		}
-		parentFolder = d.torrent.Name
+		destination = filepath.Join(destination, d.torrent.Name)
 	}
+
+	d.destination = destination
 
 	var fileBegin int64
 	for i, f := range d.torrent.Files {
-		file, err := createFileFromPath(parentFolder, f.Path)
+		file, err := createFileFromPath(destination, f.Path)
 		if err != nil {
 			return err
 		}
@@ -190,6 +197,10 @@ func (d *Download) download() error {
 		}
 	}
 	return nil
+}
+
+func (d *Download) Key() string {
+	return fmt.Sprintf("%s:%s", hex.EncodeToString(d.torrent.InfoHash[:]), d.destination)
 }
 
 func (d *Download) Stop() {
