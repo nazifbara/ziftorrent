@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nazifbara/ziftorrent/internal/config"
 	"github.com/nazifbara/ziftorrent/internal/piece"
 )
 
@@ -17,6 +18,9 @@ func newQueueDownload(t *testing.T, queueCap int) *Download {
 		pending: make(map[string]*pendingRequest),
 		ctx:     ctx,
 		cancel:  cancel,
+		config: &config.Config{
+			BlockSize: config.BlockSize,
+		},
 	}
 }
 

@@ -3,11 +3,12 @@ package client
 import (
 	"testing"
 
+	"github.com/nazifbara/ziftorrent/internal/config"
 	"github.com/nazifbara/ziftorrent/internal/torrent"
 )
 
 func TestNewDownloadRegistersTransfer(t *testing.T) {
-	c := NewClient()
+	c := NewClient(&config.Config{BlockSize: config.BlockSize})
 	t.Cleanup(c.Stop)
 
 	d := c.NewDownload(&torrent.Torrent{NumOfPieces: 1, PieceSize: 1, FinalPieceSize: 1, NumOfBlocks: 1})
@@ -20,7 +21,7 @@ func TestNewDownloadRegistersTransfer(t *testing.T) {
 }
 
 func TestNewDownloadRejectsNilTorrent(t *testing.T) {
-	c := NewClient()
+	c := NewClient(&config.Config{BlockSize: config.BlockSize})
 	t.Cleanup(c.Stop)
 	if got := c.NewDownload(nil); got != nil {
 		t.Fatalf("expected nil download, got %#v", got)

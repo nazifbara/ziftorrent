@@ -3,6 +3,7 @@ package client
 import (
 	"sync"
 
+	"github.com/nazifbara/ziftorrent/internal/config"
 	"github.com/nazifbara/ziftorrent/internal/download"
 	"github.com/nazifbara/ziftorrent/internal/torrent"
 )
@@ -10,14 +11,17 @@ import (
 type Client struct {
 	mu        sync.Mutex
 	downloads []*download.Download
+	config    *config.Config
 }
 
-func NewClient() *Client {
-	return &Client{}
+func NewClient(c *config.Config) *Client {
+	return &Client{
+		config: c,
+	}
 }
 
 func (c *Client) NewDownload(torrent *torrent.Torrent) *download.Download {
-	d := download.New(torrent)
+	d := download.New(torrent, c.config)
 	if d == nil {
 		return nil
 	}

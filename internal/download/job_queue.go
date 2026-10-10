@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/nazifbara/ziftorrent/internal/config"
 	"github.com/nazifbara/ziftorrent/internal/peer"
 )
 
@@ -62,7 +61,7 @@ func (d *Download) onTimeout(key string, job *job) {
 func (d *Download) addPieceJob(pieceIndex uint32) {
 	pieceState := d.pieces[pieceIndex]
 	for i := range pieceState.BlockCount() {
-		d.addToQueue(pieceIndex, uint32(i)*config.BlockSize)
+		d.addToQueue(pieceIndex, uint32(i)*d.config.BlockSize)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/nazifbara/ziftorrent/internal/client"
+	"github.com/nazifbara/ziftorrent/internal/config"
 	"github.com/nazifbara/ziftorrent/internal/torrent"
 )
 
@@ -32,8 +33,12 @@ func run(torrentPath, trackerURL string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	c := client.NewClient()
-	d := c.NewDownload(t)
+	c, err := config.Load()
+	if err != nil || c == nil || c.ProgressFile == nil {
+		return 1, errors.New("config not load")
+	}
+	tc := client.NewClient(c)
+	d := tc.NewDownload(t)
 	var clientErr error
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -43,7 +48,7 @@ func run(torrentPath, trackerURL string) (int, error) {
 	}()
 	<-ctx.Done()
 	// Stop cancels every download and closes the files it opened.
-	c.Stop()
+	tc.Stop()
 	if clientErr != nil {
 		return 1, clientErr
 	}

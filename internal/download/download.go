@@ -46,10 +46,11 @@ type Download struct {
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
 	filesOnce       sync.Once
+	config          *config.Config
 }
 
-func New(t *torrent.Torrent) *Download {
-	if t == nil {
+func New(t *torrent.Torrent, c *config.Config) *Download {
+	if t == nil || c == nil {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -59,7 +60,7 @@ func New(t *torrent.Torrent) *Download {
 		if i == len(pieces)-1 {
 			size = t.FinalPieceSize
 		}
-		pieces[i] = piece.New(size, config.BlockSize)
+		pieces[i] = piece.New(size, c.BlockSize)
 	}
 	return &Download{
 		torrent: t,
@@ -70,6 +71,7 @@ func New(t *torrent.Torrent) *Download {
 		cancel:  cancel,
 		files:   make([]*fileState, len(t.Files)),
 		done:    make(chan struct{}),
+		config:  c,
 	}
 }
 
@@ -121,8 +123,8 @@ func (d *Download) Start(trackerURL string) error {
 		if i > 0 {
 			fileBegin += d.torrent.Files[i-1].Length
 		}
-		blocks := f.Length / int64(config.BlockSize)
-		if f.Length%int64(config.BlockSize) != 0 {
+		blocks := f.Length / int64(d.config.BlockSize)
+		if f.Length%int64(d.config.BlockSize) != 0 {
 			blocks++
 		}
 		d.files[i] = &fileState{begin: fileBegin, size: f.Length, file: file, numOfBlocks: int(blocks), name: f.Path[len(f.Path)-1]}
