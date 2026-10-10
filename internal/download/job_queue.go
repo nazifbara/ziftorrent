@@ -1,9 +1,11 @@
 package download
 
 import (
+	"encoding/hex"
 	"fmt"
 	"time"
 
+	"github.com/nazifbara/ziftorrent/internal/config"
 	"github.com/nazifbara/ziftorrent/internal/peer"
 )
 
@@ -61,7 +63,9 @@ func (d *Download) onTimeout(key string, job *job) {
 func (d *Download) addPieceJob(pieceIndex uint32) {
 	pieceState := d.pieces[pieceIndex]
 	for i := range pieceState.BlockCount() {
-		d.addToQueue(pieceIndex, uint32(i)*d.config.BlockSize)
+		offset := uint32(i) * d.config.BlockSize
+		d.addToQueue(pieceIndex, offset)
+		d.config.AddPending(hex.EncodeToString(d.torrent.InfoHash[:]), config.PendingItem{Index: pieceIndex, Begin: offset})
 	}
 }
 

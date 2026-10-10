@@ -149,6 +149,7 @@ func (d *Download) download() error {
 	for i := range d.pieces {
 		d.addPieceJob(uint32(i))
 	}
+	d.config.Save()
 
 	go func() {
 		for {

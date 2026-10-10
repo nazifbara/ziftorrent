@@ -34,7 +34,7 @@ func run(torrentPath, trackerURL string) (int, error) {
 		return 1, err
 	}
 	c, err := config.Load()
-	if err != nil || c == nil || c.ProgressFile == nil {
+	if err != nil || c == nil {
 		return 1, errors.New("config not load")
 	}
 	tc := client.NewClient(c)
