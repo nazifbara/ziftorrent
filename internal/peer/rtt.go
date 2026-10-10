@@ -1,4 +1,4 @@
-package main
+package peer
 
 import (
 	"sync"
@@ -16,7 +16,7 @@ func newRTTTracker(maxLen int) *rttTracker {
 	return &rttTracker{maxLen: maxLen}
 }
 
-func (r *rttTracker) record(sample time.Duration) {
+func (r *rttTracker) Record(sample time.Duration) {
 	if sample <= 0 {
 		return
 	}
@@ -30,7 +30,7 @@ func (r *rttTracker) record(sample time.Duration) {
 	}
 }
 
-func (r *rttTracker) timeout() time.Duration {
+func (r *rttTracker) Timeout() time.Duration {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if len(r.samples) == 0 {

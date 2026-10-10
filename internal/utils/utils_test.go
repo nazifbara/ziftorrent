@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"net"
@@ -20,7 +20,7 @@ func TestBitsToBytes(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := bitsToBytes(tc.bits)
+			got, err := BitsToBytes(tc.bits)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -43,7 +43,7 @@ func TestBitsToBytes(t *testing.T) {
 }
 
 func TestBytesToBits(t *testing.T) {
-	got := bytesToBits([]byte{0x80})
+	got := BytesToBits([]byte{0x80})
 	want := []bool{true, false, false, false, false, false, false, false}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
@@ -60,11 +60,11 @@ func TestBitsRoundTrip(t *testing.T) {
 		true, false, true, true, false, false, true, false,
 		false, true, true, false, true, false, false, true,
 	}
-	bytesOut, err := bitsToBytes(original)
+	bytesOut, err := BitsToBytes(original)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	roundTripped := bytesToBits(bytesOut)
+	roundTripped := BytesToBits(bytesOut)
 	if len(roundTripped) != len(original) {
 		t.Fatalf("length mismatch: got %d, want %d", len(roundTripped), len(original))
 	}
@@ -76,7 +76,7 @@ func TestBitsRoundTrip(t *testing.T) {
 }
 
 func TestRandomPeerID(t *testing.T) {
-	id1 := randomPeerID()
+	id1 := RandomPeerID()
 	if len(id1) != 20 {
 		t.Fatalf("expected length 20, got %d", len(id1))
 	}
@@ -84,7 +84,7 @@ func TestRandomPeerID(t *testing.T) {
 		t.Fatalf("expected prefix -qB0001-, got %q", string(id1[:8]))
 	}
 
-	id2 := randomPeerID()
+	id2 := RandomPeerID()
 	if string(id1[8:]) == string(id2[8:]) {
 		t.Fatal("expected random suffixes to differ between calls, got identical suffixes")
 	}
@@ -111,7 +111,7 @@ func newPipeConn(t *testing.T) net.Conn {
 func TestRetrySucceedsFirstTry(t *testing.T) {
 	conn := newPipeConn(t)
 	var calls int32
-	result, err := retry(3, conn, func() (string, error) {
+	result, err := Retry(3, conn, func() (string, error) {
 		atomic.AddInt32(&calls, 1)
 		return "ok", nil
 	})
@@ -130,7 +130,7 @@ func TestRetryStopsOnNonTimeoutError(t *testing.T) {
 	conn := newPipeConn(t)
 	var calls int32
 	wantErr := net.UnknownNetworkError("boom")
-	_, err := retry(5, conn, func() (string, error) {
+	_, err := Retry(5, conn, func() (string, error) {
 		atomic.AddInt32(&calls, 1)
 		return "", wantErr
 	})
@@ -145,7 +145,7 @@ func TestRetryStopsOnNonTimeoutError(t *testing.T) {
 func TestRetryExhaustsOnRepeatedTimeout(t *testing.T) {
 	conn := newPipeConn(t)
 	var calls int32
-	_, err := retry(4, conn, func() (string, error) {
+	_, err := Retry(4, conn, func() (string, error) {
 		atomic.AddInt32(&calls, 1)
 		return "", timeoutErr{}
 	})

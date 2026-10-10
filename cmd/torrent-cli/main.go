@@ -8,47 +8,44 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/nazifbara/ziftorrent/internal/client"
+	"github.com/nazifbara/ziftorrent/internal/torrent"
 )
 
 func main() {
 	torrentPath := flag.String("f", "", "path to the torrent file")
-	trackerUrl := flag.String("t", "", "tracker url")
+	trackerURL := flag.String("t", "", "tracker url")
 	flag.Parse()
-	code, err := run(*torrentPath, *trackerUrl)
+	code, err := run(*torrentPath, *trackerURL)
 	if err != nil {
 		fmt.Println(err.Error())
 	}
 	os.Exit(code)
 }
 
-func run(torrentPath, trackerUrl string) (int, error) {
+func run(torrentPath, trackerURL string) (int, error) {
 	if torrentPath == "" {
 		return 1, errors.New("path to torrent file not provided")
 	}
-	torrent, err := openTorrent(torrentPath)
+	t, err := torrent.Open(torrentPath)
 	if err != nil {
 		return 1, err
 	}
-	announceList := torrent.announceList
-	if trackerUrl != "" {
-		announceList = [][]string{{trackerUrl}}
-	}
-	client := newClient(torrent)
+	c := client.NewClient()
+	d := c.NewDownload(t)
 	var clientErr error
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 	go func() {
-		clientErr = client.Start(announceList)
+		clientErr = d.Start(trackerURL)
 		cancel()
 	}()
 	<-ctx.Done()
-	client.shutdown()
-	for _, f := range client.filesGrid {
-		if f != nil {
-			f.file.Close()
-		}
-	}
+	// Stop cancels every download and closes the files it opened.
+	c.Stop()
 	if clientErr != nil {
-		return 1, err
+		return 1, clientErr
 	}
 	return 0, nil
 }

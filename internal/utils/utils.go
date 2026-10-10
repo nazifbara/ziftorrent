@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"crypto/rand"
@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func stringByteSize(b int64) string {
+func StringByteSize(b int64) string {
 	const unit = 1000
 	if b < unit {
 		return fmt.Sprintf("%d B", b)
@@ -22,7 +22,7 @@ func stringByteSize(b int64) string {
 		float64(b)/float64(div), "kMGTPE"[exp])
 }
 
-func bitsToBytes(bits []bool) ([]byte, error) {
+func BitsToBytes(bits []bool) ([]byte, error) {
 	if len(bits)%8 != 0 {
 		return []byte{}, errors.New("bit length must be a multiple of 8")
 	}
@@ -40,7 +40,7 @@ func bitsToBytes(bits []bool) ([]byte, error) {
 	return out, nil
 }
 
-func bytesToBits(b []byte) []bool {
+func BytesToBits(b []byte) []bool {
 	bits := make([]bool, 0, len(b)*8)
 	for _, v := range b {
 		for i := 7; i >= 0; i-- {
@@ -50,7 +50,7 @@ func bytesToBits(b []byte) []bool {
 	return bits
 }
 
-func randomPeerID() []byte {
+func RandomPeerID() []byte {
 	peerID := make([]byte, 20)
 	copy(peerID, []byte("-qB0001-"))
 	if _, err := rand.Read(peerID[8:]); err != nil {
@@ -59,7 +59,7 @@ func randomPeerID() []byte {
 	return peerID
 }
 
-func retry[T any](retries int, conn net.Conn, operation func() (T, error)) (T, error) {
+func Retry[T any](retries int, conn net.Conn, operation func() (T, error)) (T, error) {
 	var lastErr error
 	var result T
 	for range retries {

@@ -1,4 +1,4 @@
-package main
+package wire
 
 import (
 	"bytes"
@@ -10,7 +10,7 @@ import (
 func TestBuildHandShake(t *testing.T) {
 	infoHash := [20]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}
 
-	handshake := buildHandShake(infoHash[:])
+	handshake := BuildHandShake(infoHash[:])
 	if len(handshake) != 68 {
 		t.Fatalf("expected handshake length 68, got %d", len(handshake))
 	}
@@ -41,7 +41,7 @@ func TestBuildHandShake(t *testing.T) {
 }
 
 func TestBuildKeepAlive(t *testing.T) {
-	ka := buildKeepAlive()
+	ka := BuildKeepAlive()
 	if len(ka) != 4 {
 		t.Fatalf("expected keep-alive length 4, got %d", len(ka))
 	}
@@ -60,7 +60,7 @@ func TestBuildChoke(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildChoke()
+			got := BuildChoke()
 			if !bytes.Equal(got, tc.want) {
 				t.Fatalf("%s: got %v, want %v", tc.name, got, tc.want)
 			}
@@ -78,7 +78,7 @@ func TestBuildUnchoke(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildUnchoke()
+			got := BuildUnchoke()
 			if !bytes.Equal(got, tc.want) {
 				t.Fatalf("%s: got %v, want %v", tc.name, got, tc.want)
 			}
@@ -96,7 +96,7 @@ func TestBuildInterested(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildInterested()
+			got := BuildInterested()
 			if !bytes.Equal(got, tc.want) {
 				t.Fatalf("%s: got %v, want %v", tc.name, got, tc.want)
 			}
@@ -114,7 +114,7 @@ func TestBuildUninterested(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildUninterested()
+			got := BuildUninterested()
 			if !bytes.Equal(got, tc.want) {
 				t.Fatalf("%s: got %v, want %v", tc.name, got, tc.want)
 			}
@@ -135,7 +135,7 @@ func TestBuildBitfield(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := buildBitfield(tc.payload)
+			got, err := BuildBitfield(tc.payload)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -159,7 +159,7 @@ func TestBuildHave(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildHave(tc.pieceIdx)
+			got := BuildHave(tc.pieceIdx)
 			if !bytes.Equal(got, tc.want) {
 				t.Fatalf("%s: got %v, want %v", tc.name, got, tc.want)
 			}
@@ -180,7 +180,7 @@ func TestBuildRequest(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildRequest(tc.pieceIdx, tc.begin, tc.pieceLength)
+			got := BuildRequest(tc.pieceIdx, tc.begin, tc.pieceLength)
 			if len(got) != 17 {
 				t.Fatalf("%s: expected length 17, got %d", tc.name, len(got))
 			}
@@ -213,7 +213,7 @@ func TestBuildCancel(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildCancel(tc.pieceIdx, tc.begin, tc.pieceLength)
+			got := BuildCancel(tc.pieceIdx, tc.begin, tc.pieceLength)
 			if len(got) != 17 {
 				t.Fatalf("%s: expected length 17, got %d", tc.name, len(got))
 			}
@@ -244,7 +244,7 @@ func TestBuildPort(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildPort(tc.port)
+			got := BuildPort(tc.port)
 			if len(got) != 7 {
 				t.Fatalf("%s: expected length 7, got %d", tc.name, len(got))
 			}
@@ -271,7 +271,7 @@ func TestBuildPiece(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildPiece(tc.pieceIdx, tc.begin, tc.block)
+			got := BuildPiece(tc.pieceIdx, tc.begin, tc.block)
 			if len(got) != 13+len(tc.block) {
 				t.Fatalf("%s: expected length %d, got %d", tc.name, 13+len(tc.block), len(got))
 			}
@@ -298,16 +298,16 @@ func TestParseMessage(t *testing.T) {
 		want    Message
 		wantErr string
 	}{
-		{name: "keep alive", input: []byte{0, 0, 0, 0}, want: Message{size: 0}},
-		{name: "choke", input: []byte{0, 0, 0, 1, 0}, want: Message{size: 1, id: 0}},
-		{name: "have", input: []byte{0, 0, 0, 5, 4, 0, 0, 0, 42}, want: Message{size: 5, id: 4, payload: []byte{0, 0, 0, 42}}},
+		{name: "keep alive", input: []byte{0, 0, 0, 0}, want: Message{Size: 0}},
+		{name: "choke", input: []byte{0, 0, 0, 1, 0}, want: Message{Size: 1, ID: 0}},
+		{name: "have", input: []byte{0, 0, 0, 5, 4, 0, 0, 0, 42}, want: Message{Size: 5, ID: 4, Payload: []byte{0, 0, 0, 42}}},
 		{name: "truncated payload", input: []byte{0, 0, 0, 2, 0}, wantErr: "message unexpectedly short"},
 		{name: "too short", input: []byte{0, 0, 0}, wantErr: "message unexpectedly short"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseMessage(tc.input)
+			got, err := ParseMessage(tc.input)
 			if tc.wantErr != "" {
 				if err == nil || err.Error() != tc.wantErr {
 					t.Fatalf("expected error %q, got %v", tc.wantErr, err)
@@ -317,7 +317,7 @@ func TestParseMessage(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got.size != tc.want.size || got.id != tc.want.id || !bytes.Equal(got.payload, tc.want.payload) {
+			if got.Size != tc.want.Size || got.ID != tc.want.ID || !bytes.Equal(got.Payload, tc.want.Payload) {
 				t.Fatalf("got %+v, want %+v", got, tc.want)
 			}
 		})
@@ -335,7 +335,7 @@ func TestParsePayloads(t *testing.T) {
 		{
 			name: "request cancel payload",
 			fn: func(b []byte) (any, error) {
-				return parseRequestCancelPayload(b)
+				return ParseRequestCancelPayload(b)
 			},
 			input: []byte{0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3},
 			want:  RequestCancelPayload{Index: 1, Begin: 2, Length: 3},
@@ -343,15 +343,15 @@ func TestParsePayloads(t *testing.T) {
 		{
 			name: "request cancel invalid length",
 			fn: func(b []byte) (any, error) {
-				return parseRequestCancelPayload(b)
+				return ParseRequestCancelPayload(b)
 			},
 			input:   []byte{0, 0, 0, 1},
-			wantErr: payloadSizeErr.Error(),
+			wantErr: errPayloadSize.Error(),
 		},
 		{
 			name: "block payload",
 			fn: func(b []byte) (any, error) {
-				return parseBlockPayload(b)
+				return ParseBlockPayload(b)
 			},
 			input: []byte{0, 0, 0, 1, 0, 0, 0, 2, 9, 8, 7},
 			want:  BlockPayload{Index: 1, Begin: 2, Block: []byte{9, 8, 7}},
@@ -359,15 +359,15 @@ func TestParsePayloads(t *testing.T) {
 		{
 			name: "block payload invalid length",
 			fn: func(b []byte) (any, error) {
-				return parseBlockPayload(b)
+				return ParseBlockPayload(b)
 			},
 			input:   []byte{0, 0, 0, 1, 0, 0, 0},
-			wantErr: payloadSizeErr.Error(),
+			wantErr: errPayloadSize.Error(),
 		},
 		{
 			name: "port payload",
 			fn: func(b []byte) (any, error) {
-				return parsePortPayload(b)
+				return ParsePortPayload(b)
 			},
 			input: []byte{0x01, 0x02},
 			want:  PortPayload{Port: 258},
@@ -375,15 +375,15 @@ func TestParsePayloads(t *testing.T) {
 		{
 			name: "port payload invalid length",
 			fn: func(b []byte) (any, error) {
-				return parsePortPayload(b)
+				return ParsePortPayload(b)
 			},
 			input:   []byte{0x01},
-			wantErr: payloadSizeErr.Error(),
+			wantErr: errPayloadSize.Error(),
 		},
 		{
 			name: "have payload",
 			fn: func(b []byte) (any, error) {
-				return parseHavePayload(b)
+				return ParseHavePayload(b)
 			},
 			input: []byte{0, 0, 0, 42},
 			want:  HavePayload{Index: 42},
@@ -391,15 +391,15 @@ func TestParsePayloads(t *testing.T) {
 		{
 			name: "have payload invalid length",
 			fn: func(b []byte) (any, error) {
-				return parseHavePayload(b)
+				return ParseHavePayload(b)
 			},
 			input:   []byte{0, 0},
-			wantErr: payloadSizeErr.Error(),
+			wantErr: errPayloadSize.Error(),
 		},
 		{
 			name: "bitfield payload",
 			fn: func(b []byte) (any, error) {
-				return parseBitfieldPayload(b), nil
+				return ParseBitfieldPayload(b), nil
 			},
 			input: []byte{0x80},
 			want:  BitfieldPayload{Bitfield: []bool{true, false, false, false, false, false, false, false}},

@@ -1,9 +1,11 @@
-package main
+package tracker
 
 import (
 	"encoding/binary"
 	"net"
 	"testing"
+
+	"github.com/nazifbara/ziftorrent/internal/torrent"
 )
 
 func TestBuildConnReq(t *testing.T) {
@@ -27,16 +29,16 @@ func TestParseConnResp(t *testing.T) {
 	copy(resp[8:16], []byte{1, 2, 3, 4, 5, 6, 7, 8})
 
 	got := parseConnResp(resp)
-	if binary.BigEndian.Uint32(got.Action) != 0 {
-		t.Fatalf("expected action 0, got %v", got.Action)
+	if binary.BigEndian.Uint32(got.action) != 0 {
+		t.Fatalf("expected action 0, got %v", got.action)
 	}
-	if binary.BigEndian.Uint32(got.TransactionID) != 12345 {
-		t.Fatalf("expected transaction id 12345, got %v", got.TransactionID)
+	if binary.BigEndian.Uint32(got.transactionID) != 12345 {
+		t.Fatalf("expected transaction id 12345, got %v", got.transactionID)
 	}
 	wantConnID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	for i := range wantConnID {
-		if got.ConnectionID[i] != wantConnID[i] {
-			t.Fatalf("connection id mismatch: got %v, want %v", got.ConnectionID, wantConnID)
+		if got.connectionID[i] != wantConnID[i] {
+			t.Fatalf("connection id mismatch: got %v, want %v", got.connectionID, wantConnID)
 		}
 	}
 }
@@ -54,21 +56,24 @@ func TestParseAnnounceResp(t *testing.T) {
 	resp = append(resp, peer1...)
 	resp = append(resp, peer2...)
 
-	got := parseAnnounceResp(resp)
-	if got.Leechers != 3 {
-		t.Fatalf("expected 3 leechers, got %d", got.Leechers)
+	got, err := parseAnnounceResp(resp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.Seeders != 7 {
-		t.Fatalf("expected 7 seeders, got %d", got.Seeders)
+	if got.leechers != 3 {
+		t.Fatalf("expected 3 leechers, got %d", got.leechers)
 	}
-	if len(got.PeerAddresses) != 2 {
-		t.Fatalf("expected 2 peer addresses, got %d", len(got.PeerAddresses))
+	if got.seeders != 7 {
+		t.Fatalf("expected 7 seeders, got %d", got.seeders)
 	}
-	if got.PeerAddresses[0].IP.String() != "192.168.1.1" || got.PeerAddresses[0].Port != 6881 {
-		t.Fatalf("unexpected first peer: %+v", got.PeerAddresses[0])
+	if len(got.peerAddresses) != 2 {
+		t.Fatalf("expected 2 peer addresses, got %d", len(got.peerAddresses))
 	}
-	if got.PeerAddresses[1].IP.String() != "10.0.0.5" || got.PeerAddresses[1].Port != 9999 {
-		t.Fatalf("unexpected second peer: %+v", got.PeerAddresses[1])
+	if got.peerAddresses[0].IP.String() != "192.168.1.1" || got.peerAddresses[0].Port != 6881 {
+		t.Fatalf("unexpected first peer: %+v", got.peerAddresses[0])
+	}
+	if got.peerAddresses[1].IP.String() != "10.0.0.5" || got.peerAddresses[1].Port != 9999 {
+		t.Fatalf("unexpected second peer: %+v", got.peerAddresses[1])
 	}
 }
 
@@ -83,10 +88,10 @@ func TestBuildAnnounceReq(t *testing.T) {
 	for i := range infoHash {
 		infoHash[i] = byte(i + 1)
 	}
-	c := &Client{torrent: &Torrent{infoHash: infoHash, numOfPieces: 42}}
+	tor := torrent.Torrent{InfoHash: infoHash, ContentSize: 42}
 
 	connID := []byte{9, 9, 9, 9, 9, 9, 9, 9}
-	got := c.BuildAnnounceReq(connID, conn)
+	got := buildAnnounceReq(connID, conn, tor)
 
 	if len(got) != 98 {
 		t.Fatalf("expected length 98, got %d", len(got))

@@ -1,4 +1,4 @@
-package main
+package download
 
 import (
 	"bytes"
@@ -9,9 +9,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/nazifbara/ziftorrent/internal/torrent"
 )
 
-func newFileState(t *testing.T, begin, size int64) *FileState {
+func newFileState(t *testing.T, begin, size int64) *fileState {
 	t.Helper()
 	dir := t.TempDir()
 	f, err := os.Create(filepath.Join(dir, "piece.bin"))
@@ -23,16 +25,16 @@ func newFileState(t *testing.T, begin, size int64) *FileState {
 	if err := f.Truncate(size); err != nil {
 		t.Fatalf("failed to truncate test file: %v", err)
 	}
-	return &FileState{begin: begin, size: size, file: f, numOfBlocks: 1}
+	return &fileState{begin: begin, size: size, file: f, numOfBlocks: 1}
 }
 
-func newDownloadTestClient(t *testing.T, filesGrid []*FileState, contentSize uint64) *Client {
+func newDownloadTestClient(t *testing.T, filesGrid []*fileState, contentSize uint64) *Download {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	return &Client{
-		filesGrid: filesGrid,
-		torrent:   &Torrent{contentSize: contentSize},
+	return &Download{
+		files:     filesGrid,
+		torrent:   &torrent.Torrent{ContentSize: contentSize},
 		done:      make(chan struct{}),
 		startedAt: time.Now(),
 		ctx:       ctx,
@@ -42,7 +44,7 @@ func newDownloadTestClient(t *testing.T, filesGrid []*FileState, contentSize uin
 
 func TestWriteAtGlobalWithinSingleFile(t *testing.T) {
 	fs := newFileState(t, 0, 20)
-	c := newDownloadTestClient(t, []*FileState{fs}, 100)
+	c := newDownloadTestClient(t, []*fileState{fs}, 100)
 
 	data := []byte("hello world")
 	if err := c.writeAtGlobal(5, data); err != nil {
@@ -64,7 +66,7 @@ func TestWriteAtGlobalWithinSingleFile(t *testing.T) {
 func TestWriteAtGlobalSpansTwoFiles(t *testing.T) {
 	fsA := newFileState(t, 0, 10)  // logical bytes [0,10)
 	fsB := newFileState(t, 10, 20) // logical bytes [10,30)
-	c := newDownloadTestClient(t, []*FileState{fsA, fsB}, 100)
+	c := newDownloadTestClient(t, []*fileState{fsA, fsB}, 100)
 
 	data := bytes.Repeat([]byte{0xAB}, 15) // begin=5 .. end=20 -- straddles the boundary at 10
 	if err := c.writeAtGlobal(5, data); err != nil {
@@ -90,7 +92,7 @@ func TestWriteAtGlobalSpansTwoFiles(t *testing.T) {
 
 func TestWriteAtGlobalOffsetOutOfRange(t *testing.T) {
 	fs := newFileState(t, 0, 10)
-	c := newDownloadTestClient(t, []*FileState{fs}, 100)
+	c := newDownloadTestClient(t, []*fileState{fs}, 100)
 
 	err := c.writeAtGlobal(9999, []byte{1, 2, 3})
 	if err == nil {
@@ -100,7 +102,7 @@ func TestWriteAtGlobalOffsetOutOfRange(t *testing.T) {
 
 func TestWriteAtGlobalClosesDoneChannelWhenComplete(t *testing.T) {
 	fs := newFileState(t, 0, 5)
-	c := newDownloadTestClient(t, []*FileState{fs}, 5) // ContentSize == what we're about to write
+	c := newDownloadTestClient(t, []*fileState{fs}, 5) // ContentSize == what we're about to write
 
 	data := []byte{1, 2, 3, 4, 5}
 	// Simulate the totalDownloaded accounting that onBlockReceived does before
@@ -111,7 +113,7 @@ func TestWriteAtGlobalClosesDoneChannelWhenComplete(t *testing.T) {
 	}
 
 	select {
-	case <-c.done:
+	case <-c.Done():
 	default:
 		t.Fatal("expected c.done to be closed once totalDownloaded reaches ContentSize")
 	}
@@ -119,7 +121,7 @@ func TestWriteAtGlobalClosesDoneChannelWhenComplete(t *testing.T) {
 
 func TestWriteAtGlobalConcurrentWritesAreSafe(t *testing.T) {
 	fs := newFileState(t, 0, 800)
-	c := newDownloadTestClient(t, []*FileState{fs}, 100000)
+	c := newDownloadTestClient(t, []*fileState{fs}, 100000)
 
 	var wg sync.WaitGroup
 	var errs atomic.Int32
