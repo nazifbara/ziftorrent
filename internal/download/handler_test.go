@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nazifbara/ziftorrent/internal/config"
 	"github.com/nazifbara/ziftorrent/internal/torrent"
 )
 
@@ -35,6 +36,7 @@ func newDownloadTestClient(t *testing.T, filesGrid []*fileState, contentSize uin
 	return &Download{
 		files:     filesGrid,
 		torrent:   &torrent.Torrent{ContentSize: contentSize},
+		config:    &config.Config{BlockSize: config.BlockSize},
 		done:      make(chan struct{}),
 		startedAt: time.Now(),
 		ctx:       ctx,

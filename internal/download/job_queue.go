@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/nazifbara/ziftorrent/internal/config"
 	"github.com/nazifbara/ziftorrent/internal/peer"
 )
 
@@ -64,7 +63,6 @@ func (d *Download) addPieceJob(pieceIndex uint32) {
 	for i := range pieceState.BlockCount() {
 		offset := uint32(i) * d.config.BlockSize
 		d.addToQueue(pieceIndex, offset)
-		d.config.AddPending(d.Key(), config.PendingItem{Index: pieceIndex, Begin: offset})
 	}
 }
 

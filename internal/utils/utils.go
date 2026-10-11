@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+func GlobalBegin(pieceIndex, pieceBegin uint32, pieceSize uint64) int64 {
+	return int64(pieceIndex)*int64(pieceSize) + int64(pieceBegin)
+}
+
 func StringByteSize(b int64) string {
 	const unit = 1000
 	if b < unit {

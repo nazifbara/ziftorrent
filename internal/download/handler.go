@@ -198,12 +198,14 @@ func (d *Download) onBlockReceived(p *peer.Peer, msg wire.Message) {
 			fmt.Println("❌ Couldn't write to file")
 			d.finish()
 		}
+		if err := d.config.SaveProgress(); err != nil {
+			fmt.Println("❌ Couldn't save download progress")
+		}
 	}(payload.Block)
 }
 
 func (d *Download) writeToFile(pieceIndex, pieceBegin uint32, block []byte) error {
-	globalBegin := int64(pieceIndex)*int64(d.torrent.PieceSize) + int64(pieceBegin)
-	return d.writeAtGlobal(globalBegin, block)
+	return d.writeAtGlobal(utils.GlobalBegin(pieceIndex, pieceBegin, d.torrent.PieceSize), block)
 }
 
 func (d *Download) writeAtGlobal(globalBegin int64, data []byte) error {
@@ -218,6 +220,7 @@ func (d *Download) writeAtGlobal(globalBegin int64, data []byte) error {
 		if err != nil {
 			return err
 		}
+		d.config.RecordProgress(d.Key(), globalBegin, uint32(n))
 		if d.totalDownloaded.Load() == int64(d.torrent.ContentSize) {
 			fmt.Printf("🔥 Download completed in %v\n", time.Since(d.startedAt))
 			d.finish()
