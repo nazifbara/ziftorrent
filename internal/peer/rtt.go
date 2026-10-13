@@ -39,6 +39,6 @@ func (r *rttTracker) Timeout() time.Duration {
 	avg := r.sum / time.Duration(len(r.samples))
 	t := avg * 4
 	t = max(t, 2*time.Second)
-	t = min(t, 20*time.Second)
+	t = min(t, 10*time.Second)
 	return t
 }

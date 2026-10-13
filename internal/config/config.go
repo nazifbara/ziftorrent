@@ -116,7 +116,8 @@ func Load(infohash []byte, destination string) (*Config, error) {
 	infohashStr := hex.EncodeToString(infohash)
 	downloadKey := infohashStr + "|" + destination
 	keyHash := sha1.Sum([]byte(downloadKey))
-	configDirPath := filepath.Join(homePath, ".config/ziftorrent", hex.EncodeToString(keyHash[:]))
+	keyHashStr := hex.EncodeToString(keyHash[:])
+	configDirPath := filepath.Join(homePath, ".config/ziftorrent", keyHashStr)
 	if err := os.MkdirAll(configDirPath, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
 		return nil, err
 	}
@@ -125,7 +126,7 @@ func Load(infohash []byte, destination string) (*Config, error) {
 		return nil, err
 	}
 	defer progressFile.Close()
-	progress := progress{DownloadKey: downloadKey}
+	progress := progress{DownloadKey: keyHashStr}
 	decoder := json.NewDecoder(progressFile)
 	if err := decoder.Decode(&progress); err != nil {
 		if !errors.Is(err, io.EOF) {
