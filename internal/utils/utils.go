@@ -12,6 +12,10 @@ func GlobalBegin(pieceIndex, pieceBegin uint32, pieceSize uint64) int64 {
 	return int64(pieceIndex)*int64(pieceSize) + int64(pieceBegin)
 }
 
+func FindIndexByOffset(offset int64, pieceSize uint64) uint32 {
+	return uint32(offset) / uint32(pieceSize)
+}
+
 func StringByteSize(b int64) string {
 	const unit = 1000
 	if b < unit {

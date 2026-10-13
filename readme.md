@@ -34,7 +34,7 @@ A few things worth knowing before diving in:
 Requires Go installed locally (see [go.dev/dl](https://go.dev/dl/)).
 
 ```sh
-git clone https://github.com/<your-username>/ziftorrent.git
+git clone https://github.com/nazifbara/ziftorrent.git
 cd ziftorrent
 go run ./cmd/torrent-cli -f path/to/file.torrent
 ```
@@ -60,9 +60,9 @@ go build ./cmd/torrent-cli
 
 Flags:
 
-| Flag | Description |
-|---|---|
-| `-f` | Path to the `.torrent` file (required) |
+| Flag | Description                                                           |
+| ---- | --------------------------------------------------------------------- |
+| `-f` | Path to the `.torrent` file (required)                                |
 | `-t` | Override tracker URL instead of using the torrent's own announce list |
 
 The client exits once every byte of the torrent's content has been written and
@@ -89,22 +89,22 @@ internal/
   utils/             Shared helpers
 ```
 
-| Path | Responsibility |
-|---|---|
-| `cmd/torrent-cli/main.go` | Flag parsing, signal handling, top-level shutdown |
-| `internal/client/client.go` | `Client`, the registry of active `Download`s |
-| `internal/download/download.go` | `Download` struct, output file creation, peer connection loop |
-| `internal/download/handler.go` | Peer message handling, request/response flow, disk writes |
-| `internal/download/job_queue.go` | Job queue, enqueue/requeue, timeout handling |
-| `internal/peer/peers.go` | `Peer`: connection, choke state, bitfield |
-| `internal/peer/handshake.go` | BitTorrent handshake exchange |
-| `internal/peer/rtt.go` | Per-peer adaptive RTT tracking |
-| `internal/piece/piece.go` | `State`: block assembly, reset, release |
-| `internal/torrent/torrent.go` | `.torrent` (bencode) parsing, info hash, piece hashes, block sizing |
-| `internal/tracker/tracker.go` | UDP tracker connect/announce, peer address parsing, connected-peer set |
-| `internal/wire/wire.go` | Wire protocol message encode/decode |
-| `internal/config/config.go` | Block size constant |
-| `internal/utils/utils.go` | Bit packing, peer ID generation, retry helper, byte-size formatting |
+| Path                             | Responsibility                                                         |
+| -------------------------------- | ---------------------------------------------------------------------- |
+| `cmd/torrent-cli/main.go`        | Flag parsing, signal handling, top-level shutdown                      |
+| `internal/client/client.go`      | `Client`, the registry of active `Download`s                           |
+| `internal/download/download.go`  | `Download` struct, output file creation, peer connection loop          |
+| `internal/download/handler.go`   | Peer message handling, request/response flow, disk writes              |
+| `internal/download/job_queue.go` | Job queue, enqueue/requeue, timeout handling                           |
+| `internal/peer/peers.go`         | `Peer`: connection, choke state, bitfield                              |
+| `internal/peer/handshake.go`     | BitTorrent handshake exchange                                          |
+| `internal/peer/rtt.go`           | Per-peer adaptive RTT tracking                                         |
+| `internal/piece/piece.go`        | `State`: block assembly, reset, release                                |
+| `internal/torrent/torrent.go`    | `.torrent` (bencode) parsing, info hash, piece hashes, block sizing    |
+| `internal/tracker/tracker.go`    | UDP tracker connect/announce, peer address parsing, connected-peer set |
+| `internal/wire/wire.go`          | Wire protocol message encode/decode                                    |
+| `internal/config/config.go`      | Block size constant                                                    |
+| `internal/utils/utils.go`        | Bit packing, peer ID generation, retry helper, byte-size formatting    |
 
 ### Architecture notes
 
@@ -153,18 +153,18 @@ block's write across a file boundary if it straddles two files.
 go test ./...
 ```
 
-| Test file | Covers |
-|---|---|
-| `internal/wire/wire_test.go` | Wire protocol message building/parsing |
-| `internal/utils/utils_test.go` | Bit packing, peer ID generation, the retry helper |
-| `internal/peer/rtt_test.go` | RTT averaging, windowing, timeout clamping |
-| `internal/peer/handshake_test.go` | Handshake acceptance, wrong info hash/protocol rejection |
-| `internal/torrent/torrent_test.go` | Bencode parsing, piece hashing, single/multi-file layout, block sizing |
-| `internal/tracker/tracker_test.go` | UDP tracker request/response wire format |
-| `internal/piece/piece_test.go` | Block assembly, out-of-bounds rejection, reset |
-| `internal/download/job_queue_test.go` | Job enqueue/requeue, timeout handling |
-| `internal/download/handler_test.go` | Disk writes, including multi-file boundary splitting |
-| `internal/client/client_test.go` | Download registration |
+| Test file                             | Covers                                                                 |
+| ------------------------------------- | ---------------------------------------------------------------------- |
+| `internal/wire/wire_test.go`          | Wire protocol message building/parsing                                 |
+| `internal/utils/utils_test.go`        | Bit packing, peer ID generation, the retry helper                      |
+| `internal/peer/rtt_test.go`           | RTT averaging, windowing, timeout clamping                             |
+| `internal/peer/handshake_test.go`     | Handshake acceptance, wrong info hash/protocol rejection               |
+| `internal/torrent/torrent_test.go`    | Bencode parsing, piece hashing, single/multi-file layout, block sizing |
+| `internal/tracker/tracker_test.go`    | UDP tracker request/response wire format                               |
+| `internal/piece/piece_test.go`        | Block assembly, out-of-bounds rejection, reset                         |
+| `internal/download/job_queue_test.go` | Job enqueue/requeue, timeout handling                                  |
+| `internal/download/handler_test.go`   | Disk writes, including multi-file boundary splitting                   |
+| `internal/client/client_test.go`      | Download registration                                                  |
 
 ### Good areas to contribute
 

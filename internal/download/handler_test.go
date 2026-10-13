@@ -3,6 +3,7 @@ package download
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,7 +12,10 @@ import (
 	"time"
 
 	"github.com/nazifbara/ziftorrent/internal/config"
+	"github.com/nazifbara/ziftorrent/internal/peer"
+	"github.com/nazifbara/ziftorrent/internal/piece"
 	"github.com/nazifbara/ziftorrent/internal/torrent"
+	"github.com/nazifbara/ziftorrent/internal/wire"
 )
 
 func newFileState(t *testing.T, begin, size int64) *fileState {
@@ -102,25 +106,6 @@ func TestWriteAtGlobalOffsetOutOfRange(t *testing.T) {
 	}
 }
 
-func TestWriteAtGlobalClosesDoneChannelWhenComplete(t *testing.T) {
-	fs := newFileState(t, 0, 5)
-	c := newDownloadTestClient(t, []*fileState{fs}, 5) // ContentSize == what we're about to write
-
-	data := []byte{1, 2, 3, 4, 5}
-	// Simulate the totalDownloaded accounting that onBlockReceived does before
-	// calling writeToFile/writeAtGlobal.
-	c.totalDownloaded.Store(int64(len(data)))
-	if err := c.writeAtGlobal(0, data); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	select {
-	case <-c.Done():
-	default:
-		t.Fatal("expected c.done to be closed once totalDownloaded reaches ContentSize")
-	}
-}
-
 func TestWriteAtGlobalConcurrentWritesAreSafe(t *testing.T) {
 	fs := newFileState(t, 0, 800)
 	c := newDownloadTestClient(t, []*fileState{fs}, 100000)
@@ -140,5 +125,134 @@ func TestWriteAtGlobalConcurrentWritesAreSafe(t *testing.T) {
 	wg.Wait()
 	if errs.Load() != 0 {
 		t.Fatalf("expected all concurrent writes to succeed, got %d errors", errs.Load())
+	}
+}
+
+func TestReadPieceSpansFiles(t *testing.T) {
+	// 25 bytes of content split over three files, cut into pieces of 10 bytes:
+	// piece 0 = [0,10), piece 1 = [10,20), piece 2 = [20,25) (short last piece).
+	fsA := newFileState(t, 0, 4)   // logical bytes [0,4)
+	fsB := newFileState(t, 4, 8)   // logical bytes [4,12)
+	fsC := newFileState(t, 12, 13) // logical bytes [12,25)
+	c := newDownloadTestClient(t, []*fileState{fsA, fsB, fsC}, 25)
+	c.torrent.PieceSize = 10
+	c.pieces = []*piece.State{piece.New(10, 5), piece.New(10, 5), piece.New(5, 5)}
+
+	content := make([]byte, 25)
+	for i := range content {
+		content[i] = byte(i + 1)
+	}
+	if err := c.writeAtGlobal(0, content); err != nil {
+		t.Fatalf("failed to write content: %v", err)
+	}
+
+	for i, want := range [][]byte{content[0:10], content[10:20], content[20:25]} {
+		got, err := c.readPiece(i)
+		if err != nil {
+			t.Fatalf("piece %d: unexpected error: %v", i, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("piece %d: got %v, want %v", i, got, want)
+		}
+	}
+}
+
+func TestReadPieceFailsWhenFileIsShorterThanPiece(t *testing.T) {
+	fs := newFileState(t, 0, 10)
+	c := newDownloadTestClient(t, []*fileState{fs}, 10)
+	c.torrent.PieceSize = 10
+	c.pieces = []*piece.State{piece.New(10, 5)}
+	if err := fs.file.Truncate(6); err != nil {
+		t.Fatalf("failed to truncate test file: %v", err)
+	}
+
+	if _, err := c.readPiece(0); err == nil {
+		t.Fatal("expected an error when the piece is not fully on disk, got nil")
+	}
+}
+
+// newBlockTestClient builds a single-file download of one 10-byte piece made
+// of two 5-byte blocks, with both blocks already requested.
+func newBlockTestClient(t *testing.T, content []byte) *Download {
+	t.Helper()
+	// SaveProgress writes under the home directory; keep it out of the real one.
+	t.Setenv("HOME", t.TempDir())
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	cfg.BlockSize = 5
+
+	c := newDownloadTestClient(t, []*fileState{newFileState(t, 0, 10)}, 10)
+	c.config = cfg
+	// Let background progress saves finish before the temp home is removed.
+	t.Cleanup(c.wg.Wait)
+	c.torrent.PieceSize = 10
+	c.torrent.PieceHashes = [][20]byte{sha1.Sum(content)}
+	c.pieces = []*piece.State{piece.New(10, 5)}
+	c.queue = make(chan *job, 2)
+	c.pending = make(map[string]*pendingRequest)
+	for _, begin := range []uint32{0, 5} {
+		c.pending[pendingKey(0, begin)] = &pendingRequest{
+			job:   &job{index: 0, begin: begin},
+			peer:  &peer.Peer{},
+			timer: time.NewTimer(time.Hour),
+		}
+	}
+	return c
+}
+
+func blockMessage(t *testing.T, index, begin uint32, block []byte) wire.Message {
+	t.Helper()
+	msg, err := wire.ParseMessage(wire.BuildPiece(index, begin, block))
+	if err != nil {
+		t.Fatalf("failed to build block message: %v", err)
+	}
+	return msg
+}
+
+func TestOnBlockReceivedVerifiesPieceFromDisk(t *testing.T) {
+	content := []byte("0123456789")
+	c := newBlockTestClient(t, content)
+
+	c.onBlockReceived(nil, blockMessage(t, 0, 0, content[:5]))
+	select {
+	case <-c.Done():
+		t.Fatal("download finished before the last block arrived")
+	default:
+	}
+	c.onBlockReceived(nil, blockMessage(t, 0, 5, content[5:]))
+
+	select {
+	case <-c.Done():
+	default:
+		t.Fatal("expected the download to finish once the only piece is verified")
+	}
+	if len(c.queue) != 0 {
+		t.Fatalf("expected a valid piece not to be re-queued, got %d jobs", len(c.queue))
+	}
+	got, err := c.readPiece(0)
+	if err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("unexpected piece on disk: got %q err=%v", got, err)
+	}
+}
+
+func TestOnBlockReceivedRequeuesInvalidPiece(t *testing.T) {
+	content := []byte("0123456789")
+	c := newBlockTestClient(t, content)
+
+	c.onBlockReceived(nil, blockMessage(t, 0, 0, content[:5]))
+	c.onBlockReceived(nil, blockMessage(t, 0, 5, []byte("XXXXX")))
+
+	select {
+	case <-c.Done():
+		t.Fatal("download must not finish with a corrupt piece")
+	default:
+	}
+	if len(c.queue) != 2 {
+		t.Fatalf("expected both blocks to be re-queued, got %d jobs", len(c.queue))
+	}
+	if c.pieces[0].BlockRead() != 0 || c.totalDownloaded.Load() != 0 {
+		t.Fatalf("expected piece progress to be reset: read=%d downloaded=%d", c.pieces[0].BlockRead(), c.totalDownloaded.Load())
 	}
 }

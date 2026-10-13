@@ -176,36 +176,73 @@ func (d *Download) onBlockReceived(p *peer.Peer, msg wire.Message) {
 		return
 	}
 	pieceState := d.pieces[payload.Index]
-	pieceDone, pieceBytes, err := pieceState.AddBlock(payload.Begin, payload.Block)
+	if uint64(payload.Begin)+uint64(len(payload.Block)) > pieceState.Size() {
+		return
+	}
+	// Write before counting the block: once AddBlock reports the piece as
+	// done, every one of its blocks is on disk and readPiece can verify it.
+	if err := d.writeToFile(payload.Index, payload.Begin, payload.Block); err != nil {
+		fmt.Println("❌ Couldn't write to file")
+		d.finish()
+		return
+	}
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		if err := d.config.SaveProgress(); err != nil {
+			fmt.Println("❌ Couldn't save download progress")
+		}
+	}()
+	pieceDone, err := pieceState.AddBlock(payload.Begin, payload.Block)
 	if err != nil {
 		return
 	}
 	d.totalDownloaded.Add(int64(len(payload.Block)))
 	fmt.Printf("🍰 Progress %s / %s\n", utils.StringByteSize(d.totalDownloaded.Load()), utils.StringByteSize(int64(d.torrent.ContentSize)))
 	if pieceDone {
-		isValid := int(payload.Index) < len(d.torrent.PieceHashes) && sha1.Sum(pieceBytes) == d.torrent.PieceHashes[payload.Index]
+		pieceBytes, err := d.readPiece(int(payload.Index))
+		isValid := err == nil && int(payload.Index) < len(d.torrent.PieceHashes) && sha1.Sum(pieceBytes) == d.torrent.PieceHashes[payload.Index]
 		if !isValid {
-			fmt.Printf("⚠️ Re-downloading piece %d due to invalid\n", payload.Index)
+			fmt.Printf("⚠️ Re-downloading piece %d due to invalid hash\n", payload.Index)
 			pieceState.Reset()
 			d.totalDownloaded.Add(-int64(pieceState.Size()))
 			d.addPieceJob(pr.job.index)
 			return
+		} else {
+			fmt.Printf("✅ piece %d completed\n", payload.Index)
 		}
-		pieceState.Release()
 	}
-	go func(data []byte) {
-		if err := d.writeToFile(payload.Index, payload.Begin, data); err != nil {
-			fmt.Println("❌ Couldn't write to file")
-			d.finish()
-		}
-		if err := d.config.SaveProgress(); err != nil {
-			fmt.Println("❌ Couldn't save download progress")
-		}
-	}(payload.Block)
+	if d.totalDownloaded.Load() == int64(d.torrent.ContentSize) {
+		fmt.Printf("🔥 Download completed in %v\n", time.Since(d.startedAt))
+		d.finish()
+	}
 }
 
 func (d *Download) writeToFile(pieceIndex, pieceBegin uint32, block []byte) error {
 	return d.writeAtGlobal(utils.GlobalBegin(pieceIndex, pieceBegin, d.torrent.PieceSize), block)
+}
+
+// readPiece reads a whole piece back from disk. A piece is a contiguous range
+// of the torrent-wide byte stream, so it may start in the middle of one file
+// and continue into the following ones.
+func (d *Download) readPiece(pieceIndex int) ([]byte, error) {
+	piece := make([]byte, d.pieces[pieceIndex].Size())
+	globalBegin := utils.GlobalBegin(uint32(pieceIndex), 0, d.torrent.PieceSize)
+	for buf := piece; len(buf) > 0; {
+		index := slices.IndexFunc(d.files, func(f *fileState) bool {
+			return f.begin <= globalBegin && globalBegin < f.begin+f.size
+		})
+		if index == -1 {
+			return nil, fmt.Errorf("no file found for global offset %d", globalBegin)
+		}
+		n, err := d.files[index].readAt(globalBegin, buf)
+		if err != nil {
+			return nil, err
+		}
+		buf = buf[n:]
+		globalBegin += n
+	}
+	return piece, nil
 }
 
 func (d *Download) writeAtGlobal(globalBegin int64, data []byte) error {
@@ -221,10 +258,6 @@ func (d *Download) writeAtGlobal(globalBegin int64, data []byte) error {
 			return err
 		}
 		d.config.RecordProgress(d.Key(), globalBegin, uint32(n))
-		if d.totalDownloaded.Load() == int64(d.torrent.ContentSize) {
-			fmt.Printf("🔥 Download completed in %v\n", time.Since(d.startedAt))
-			d.finish()
-		}
 		data = data[n:]
 		globalBegin += n
 	}
@@ -244,6 +277,17 @@ func (f *fileState) writeAt(globalBegin int64, data []byte) (int64, error) {
 	f.blocksWrote++
 	if f.blocksWrote == f.numOfBlocks {
 		fmt.Printf("✅ %s completed\n", f.name)
+	}
+	return n, nil
+}
+
+// readAt fills as much of buf as this file holds, starting at the
+// torrent-wide offset globalBegin, and returns how many bytes it read.
+func (f *fileState) readAt(globalBegin int64, buf []byte) (int64, error) {
+	offset := globalBegin - f.begin
+	n := min(int64(len(buf)), f.size-offset)
+	if _, err := f.file.ReadAt(buf[:n], offset); err != nil {
+		return 0, err
 	}
 	return n, nil
 }

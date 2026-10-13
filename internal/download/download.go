@@ -17,6 +17,7 @@ import (
 	"github.com/nazifbara/ziftorrent/internal/piece"
 	"github.com/nazifbara/ziftorrent/internal/torrent"
 	"github.com/nazifbara/ziftorrent/internal/tracker"
+	"github.com/nazifbara/ziftorrent/internal/utils"
 	"github.com/nazifbara/ziftorrent/internal/wire"
 )
 
@@ -94,7 +95,7 @@ func createFileFromPath(destination string, path []string) (*os.File, error) {
 			}
 			continue
 		}
-		return os.OpenFile(current, os.O_WRONLY|os.O_CREATE, 0o666)
+		return os.OpenFile(current, os.O_RDWR|os.O_CREATE, 0o666)
 	}
 	return nil, fmt.Errorf("unreachable")
 }
@@ -153,8 +154,28 @@ func (d *Download) download() error {
 	for _, address := range addresses {
 		d.addrQueue <- address
 	}
-	for i := range d.pieces {
-		d.addPieceJob(uint32(i))
+	progress := d.config.GetProgress(d.Key())
+	if len(progress) == 0 {
+		for i := range d.pieces {
+			d.addPieceJob(uint32(i))
+		}
+	} else if len(progress) == 1 && progress[0].End == int64(d.torrent.ContentSize) {
+		fmt.Printf("⚠️ Download already complete")
+		return nil
+	} else {
+		for i := range progress {
+			d.totalDownloaded.Add(int64(progress[i].End - progress[i].Start))
+			gapStart := progress[i].End
+			startPieceIndex := utils.FindIndexByOffset(gapStart, d.torrent.PieceSize)
+			if i != len(progress)-1 {
+				gapEnd := progress[i+1].Start
+				endPieceIndex := utils.FindIndexByOffset(gapEnd, d.torrent.PieceSize)
+				endPieceIndex = utils.FindIndexByOffset(gapEnd, d.torrent.PieceSize)
+				d.addPieceJobsBetween(startPieceIndex, endPieceIndex, uint64(gapStart), uint64(gapEnd))
+			} else if gapStart != int64(d.torrent.ContentSize) {
+				d.addPieceJobsBetween(startPieceIndex, uint32(d.torrent.NumOfPieces-1), uint64(gapStart), 0)
+			}
+		}
 	}
 
 	go func() {

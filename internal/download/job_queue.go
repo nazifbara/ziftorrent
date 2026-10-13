@@ -58,9 +58,17 @@ func (d *Download) onTimeout(key string, job *job) {
 	}
 }
 
+func (d *Download) addPieceJobsBetween(startIndex, endIndex uint32, startOffset, endOffset uint64) {
+	d.pieces[startIndex].SyncWithOffset(uint32(startOffset) - startIndex)
+	d.pieces[endIndex].SyncWithOffset(uint32(endOffset) - endIndex)
+	for i := startIndex; i <= endIndex; i++ {
+		d.addPieceJob(i)
+	}
+}
+
 func (d *Download) addPieceJob(pieceIndex uint32) {
 	pieceState := d.pieces[pieceIndex]
-	for i := range pieceState.BlockCount() {
+	for i := pieceState.BlockRead(); i < pieceState.BlockCount(); i++ {
 		offset := uint32(i) * d.config.BlockSize
 		d.addToQueue(pieceIndex, offset)
 	}

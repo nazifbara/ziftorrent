@@ -28,6 +28,10 @@ type Config struct {
 	BlockSize uint32
 }
 
+func (c *Config) GetProgress(key string) []ProgressRange {
+	return c.progress[key]
+}
+
 func (c *Config) RecordProgress(key string, globalBegin int64, blockSize uint32) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
