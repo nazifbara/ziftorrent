@@ -2,6 +2,8 @@ package config
 
 import (
 	"cmp"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -21,43 +23,44 @@ type ProgressRange struct {
 	End   int64
 }
 
+type progress struct {
+	DownloadKey string
+	Ranges      []ProgressRange
+}
+
 type Config struct {
 	mux       sync.Mutex
-	progress  map[string][]ProgressRange
+	progress  progress
 	dirPath   string
 	BlockSize uint32
 }
 
-func (c *Config) GetProgress(key string) []ProgressRange {
-	return c.progress[key]
+func (c *Config) GetProgressRanges() []ProgressRange {
+	return c.progress.Ranges
 }
 
-func (c *Config) RecordProgress(key string, globalBegin int64, blockSize uint32) {
+func (c *Config) RecordProgress(globalBegin int64, blockSize uint32) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
-
-	if c.progress == nil {
-		c.progress = make(map[string][]ProgressRange)
-	}
 
 	newItem := ProgressRange{
 		Start: globalBegin,
 		End:   globalBegin + int64(blockSize),
 	}
 
-	entry := c.progress[key]
+	ranges := c.progress.Ranges
 
 	// Find the correct insertion index to keep the slice sorted by Start
-	idx, _ := slices.BinarySearchFunc(entry, newItem.Start, func(item ProgressRange, target int64) int {
-		return cmp.Compare(item.Start, target)
+	idx, _ := slices.BinarySearchFunc(ranges, newItem.Start, func(r ProgressRange, target int64) int {
+		return cmp.Compare(r.Start, target)
 	})
 
 	// Insert the new item at the sorted position
-	entry = slices.Insert(entry, idx, newItem)
+	ranges = slices.Insert(ranges, idx, newItem)
 
 	// Sweep through and merge any overlapping or touching ranges
-	merged := make([]ProgressRange, 0, len(entry))
-	for _, current := range entry {
+	merged := make([]ProgressRange, 0, len(ranges))
+	for _, current := range ranges {
 		if len(merged) == 0 {
 			merged = append(merged, current)
 		} else {
@@ -76,7 +79,7 @@ func (c *Config) RecordProgress(key string, globalBegin int64, blockSize uint32)
 		}
 	}
 
-	c.progress[key] = merged
+	c.progress.Ranges = merged
 }
 
 func (c *Config) SaveProgress() error {
@@ -105,28 +108,29 @@ func (c *Config) progressFileName() string {
 	return filepath.Join(c.dirPath, progressFileName)
 }
 
-func Load() (*Config, error) {
+func Load(infohash []byte, destination string) (*Config, error) {
 	homePath, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
-	configDirPath := filepath.Join(homePath, ".config/ziftorrent")
+	infohashStr := hex.EncodeToString(infohash)
+	downloadKey := infohashStr + "|" + destination
+	keyHash := sha1.Sum([]byte(downloadKey))
+	configDirPath := filepath.Join(homePath, ".config/ziftorrent", hex.EncodeToString(keyHash[:]))
 	if err := os.MkdirAll(configDirPath, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
 		return nil, err
 	}
-	progressFile, err := os.OpenFile(filepath.Join(configDirPath, "progress"), os.O_RDWR|os.O_CREATE, 0o644)
+	progressFile, err := os.OpenFile(filepath.Join(configDirPath, progressFileName), os.O_RDWR|os.O_CREATE, 0o644)
 	if err != nil {
 		return nil, err
 	}
-	var progress map[string][]ProgressRange
+	defer progressFile.Close()
+	progress := progress{DownloadKey: downloadKey}
 	decoder := json.NewDecoder(progressFile)
 	if err := decoder.Decode(&progress); err != nil {
 		if !errors.Is(err, io.EOF) {
 			return nil, err
 		}
-	}
-	if progress == nil {
-		progress = make(map[string][]ProgressRange)
 	}
 
 	return &Config{

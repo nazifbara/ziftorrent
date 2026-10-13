@@ -33,7 +33,11 @@ func run(torrentPath, trackerURL string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	c, err := config.Load()
+	destination, err := os.Getwd()
+	if err != nil {
+		return 1, err
+	}
+	c, err := config.Load(t.InfoHash[:], destination)
 	if err != nil || c == nil {
 		return 1, errors.New("config not load")
 	}

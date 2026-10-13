@@ -2,7 +2,6 @@ package download
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -154,7 +153,7 @@ func (d *Download) download() error {
 	for _, address := range addresses {
 		d.addrQueue <- address
 	}
-	progress := d.config.GetProgress(d.Key())
+	progress := d.config.GetProgressRanges()
 	if len(progress) == 0 {
 		for i := range d.pieces {
 			d.addPieceJob(uint32(i))
@@ -217,10 +216,6 @@ func (d *Download) download() error {
 		}
 	}
 	return nil
-}
-
-func (d *Download) Key() string {
-	return fmt.Sprintf("%s:%s", hex.EncodeToString(d.torrent.InfoHash[:]), d.destination)
 }
 
 func (d *Download) Stop() {

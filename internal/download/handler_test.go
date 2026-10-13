@@ -177,7 +177,7 @@ func newBlockTestClient(t *testing.T, content []byte) *Download {
 	t.Helper()
 	// SaveProgress writes under the home directory; keep it out of the real one.
 	t.Setenv("HOME", t.TempDir())
-	cfg, err := config.Load()
+	cfg, err := config.Load(make([]byte, 20), "dest")
 	if err != nil {
 		t.Fatalf("failed to load config: %v", err)
 	}

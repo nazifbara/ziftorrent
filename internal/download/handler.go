@@ -257,7 +257,7 @@ func (d *Download) writeAtGlobal(globalBegin int64, data []byte) error {
 		if err != nil {
 			return err
 		}
-		d.config.RecordProgress(d.Key(), globalBegin, uint32(n))
+		d.config.RecordProgress(globalBegin, uint32(n))
 		data = data[n:]
 		globalBegin += n
 	}
