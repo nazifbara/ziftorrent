@@ -97,6 +97,7 @@ func (c *Config) SaveProgress() error {
 	if err := encoder.Encode(ranges); err != nil {
 		return err
 	}
+
 	return os.Rename(tmpName, c.progressFileName())
 }
 

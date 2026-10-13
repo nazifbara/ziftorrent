@@ -169,13 +169,35 @@ func (d *Download) download() error {
 			if i != len(progress)-1 {
 				gapEnd := progress[i+1].Start
 				endPieceIndex := utils.FindIndexByOffset(gapEnd, d.torrent.PieceSize)
-				endPieceIndex = utils.FindIndexByOffset(gapEnd, d.torrent.PieceSize)
 				d.addPieceJobsBetween(startPieceIndex, endPieceIndex, uint64(gapStart), uint64(gapEnd))
 			} else if gapStart != int64(d.torrent.ContentSize) {
 				d.addPieceJobsBetween(startPieceIndex, uint32(d.torrent.NumOfPieces-1), uint64(gapStart), 0)
 			}
 		}
 	}
+
+	saveTicker := time.NewTicker(time.Second)
+	d.wg.Go(func() {
+		for {
+			totalSnapshot := d.totalDownloaded.Load()
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-d.done:
+				return
+			case <-saveTicker.C:
+				if totalSnapshot == d.totalDownloaded.Load() {
+					continue
+				}
+				if err := d.config.SaveProgress(); err != nil {
+					fmt.Println("❌ Couldn't save download progress")
+				} else {
+					fmt.Printf("🍰 %s / %s\n", utils.StringByteSize(d.totalDownloaded.Load()), utils.StringByteSize(int64(d.torrent.ContentSize)))
+				}
+
+			}
+		}
+	})
 
 	go func() {
 		for {
@@ -221,6 +243,7 @@ func (d *Download) download() error {
 func (d *Download) Stop() {
 	d.cancel()
 	d.wg.Wait()
+	d.config.SaveProgress()
 	d.closeFiles()
 }
 

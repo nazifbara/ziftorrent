@@ -187,17 +187,11 @@ func (d *Download) onBlockReceived(p *peer.Peer, msg wire.Message) {
 		return
 	}
 
-	d.wg.Go(func() {
-		if err := d.config.SaveProgress(); err != nil {
-			fmt.Println("❌ Couldn't save download progress")
-		}
-	})
 	pieceDone, err := pieceState.AddBlock(payload.Begin, payload.Block)
 	if err != nil {
 		return
 	}
 	d.totalDownloaded.Add(int64(len(payload.Block)))
-	fmt.Printf("🍰 Progress %s / %s\n", utils.StringByteSize(d.totalDownloaded.Load()), utils.StringByteSize(int64(d.torrent.ContentSize)))
 	if pieceDone {
 		pieceBytes, err := d.readPiece(int(payload.Index))
 		isValid := err == nil && int(payload.Index) < len(d.torrent.PieceHashes) && sha1.Sum(pieceBytes) == d.torrent.PieceHashes[payload.Index]
@@ -207,8 +201,6 @@ func (d *Download) onBlockReceived(p *peer.Peer, msg wire.Message) {
 			d.totalDownloaded.Add(-int64(pieceState.Size()))
 			d.addPieceJob(pr.job.index)
 			return
-		} else {
-			fmt.Printf("✅ piece %d completed\n", payload.Index)
 		}
 	}
 	if d.totalDownloaded.Load() == int64(d.torrent.ContentSize) {
