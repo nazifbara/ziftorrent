@@ -186,13 +186,12 @@ func (d *Download) onBlockReceived(p *peer.Peer, msg wire.Message) {
 		d.finish()
 		return
 	}
-	d.wg.Add(1)
-	go func() {
-		defer d.wg.Done()
+
+	d.wg.Go(func() {
 		if err := d.config.SaveProgress(); err != nil {
 			fmt.Println("❌ Couldn't save download progress")
 		}
-	}()
+	})
 	pieceDone, err := pieceState.AddBlock(payload.Begin, payload.Block)
 	if err != nil {
 		return

@@ -23,20 +23,15 @@ type ProgressRange struct {
 	End   int64
 }
 
-type progress struct {
-	DownloadKey string
-	Ranges      []ProgressRange
-}
-
 type Config struct {
-	mux       sync.Mutex
-	progress  progress
-	dirPath   string
-	BlockSize uint32
+	mux            sync.Mutex
+	progressRanges []ProgressRange
+	dirPath        string
+	BlockSize      uint32
 }
 
 func (c *Config) GetProgressRanges() []ProgressRange {
-	return c.progress.Ranges
+	return c.progressRanges
 }
 
 func (c *Config) RecordProgress(globalBegin int64, blockSize uint32) {
@@ -48,7 +43,7 @@ func (c *Config) RecordProgress(globalBegin int64, blockSize uint32) {
 		End:   globalBegin + int64(blockSize),
 	}
 
-	ranges := c.progress.Ranges
+	ranges := c.progressRanges
 
 	// Find the correct insertion index to keep the slice sorted by Start
 	idx, _ := slices.BinarySearchFunc(ranges, newItem.Start, func(r ProgressRange, target int64) int {
@@ -79,12 +74,13 @@ func (c *Config) RecordProgress(globalBegin int64, blockSize uint32) {
 		}
 	}
 
-	c.progress.Ranges = merged
+	c.progressRanges = merged
 }
 
 func (c *Config) SaveProgress() error {
 	c.mux.Lock()
-	defer c.mux.Unlock()
+	ranges := slices.Clone(c.progressRanges)
+	c.mux.Unlock()
 
 	tmpFile, err := os.CreateTemp(c.dirPath, "progress-*.tmp")
 	if err != nil {
@@ -98,7 +94,7 @@ func (c *Config) SaveProgress() error {
 	}()
 
 	encoder := json.NewEncoder(tmpFile)
-	if err := encoder.Encode(c.progress); err != nil {
+	if err := encoder.Encode(ranges); err != nil {
 		return err
 	}
 	return os.Rename(tmpName, c.progressFileName())
@@ -126,17 +122,17 @@ func Load(infohash []byte, destination string) (*Config, error) {
 		return nil, err
 	}
 	defer progressFile.Close()
-	progress := progress{DownloadKey: keyHashStr}
+	var progressRanges []ProgressRange
 	decoder := json.NewDecoder(progressFile)
-	if err := decoder.Decode(&progress); err != nil {
+	if err := decoder.Decode(&progressRanges); err != nil {
 		if !errors.Is(err, io.EOF) {
 			return nil, err
 		}
 	}
 
 	return &Config{
-		BlockSize: BlockSize,
-		progress:  progress,
-		dirPath:   configDirPath,
+		BlockSize:      BlockSize,
+		progressRanges: progressRanges,
+		dirPath:        configDirPath,
 	}, err
 }
