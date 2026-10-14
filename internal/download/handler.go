@@ -139,6 +139,9 @@ func (d *Download) onHave(p *peer.Peer, msg wire.Message) {
 }
 
 func (d *Download) onBitfield(p *peer.Peer, msg wire.Message) {
+	if len(p.Bitfield()) > 0 {
+		return
+	}
 	payload := wire.ParseBitfieldPayload(msg.Payload)
 	p.SetBitfield(payload.Bitfield)
 	go d.runPeerWorker(p)

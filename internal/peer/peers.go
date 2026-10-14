@@ -20,7 +20,7 @@ type Peer struct {
 }
 
 func New(conn *net.TCPConn, addr *net.TCPAddr, pieceCount uint64) *Peer {
-	return &Peer{conn: conn, addr: addr, bitfield: make([]bool, pieceCount), done: make(chan struct{}), rtt: newRTTTracker(100)}
+	return &Peer{conn: conn, addr: addr, bitfield: make([]bool, 0, pieceCount), done: make(chan struct{}), rtt: newRTTTracker(100)}
 }
 
 func (p *Peer) Read(b []byte) (int, error) { return p.conn.Read(b) }
@@ -49,6 +49,8 @@ func (p *Peer) Address() *net.TCPAddr {
 func (p *Peer) MatchesAddress(addr *net.TCPAddr) bool {
 	return p != nil && p.addr != nil && addr != nil && p.addr.IP.Equal(addr.IP) && p.addr.Port == addr.Port
 }
+
+func (p *Peer) Bitfield() []bool { return p.bitfield }
 
 func (p *Peer) CanRequest(pieceIndex uint32) bool {
 	p.mu.Lock()
