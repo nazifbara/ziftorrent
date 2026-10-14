@@ -94,7 +94,7 @@ func (d *Download) readPeerMessages(p *peer.Peer) {
 		}
 		buffer = append(buffer, chunk[:n]...)
 
-		for len(buffer) < 4 {
+		for len(buffer) > 4 {
 			length := int(binary.BigEndian.Uint32(buffer[:4]))
 			if length == 0 {
 				buffer = buffer[4:]
