@@ -224,7 +224,7 @@ func (d *Download) download() error {
 					d.requeueAddress(address)
 					continue
 				}
-				go d.readPeerMessages(p)
+				d.wg.Go(func() { d.readPeerMessages(p) })
 			}
 		}
 	}()

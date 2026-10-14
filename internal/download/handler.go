@@ -60,10 +60,13 @@ func (d *Download) runPeerWorker(p *peer.Peer) {
 	}
 }
 
-func (d *Download) readPeerMessages(p *peer.Peer) {
-	d.wg.Add(1)
-	defer d.wg.Done()
+const maxMessageLength = 1 << 20
 
+// readPeerMessages must be started with d.wg.Go so Stop waits for it.
+func (d *Download) readPeerMessages(p *peer.Peer) {
+	// Unblock the pending Read on shutdown, and drop the peer once its
+	// connection is unusable so its worker stops pulling jobs.
+	defer p.Close()
 	stopWatch := make(chan struct{})
 	defer close(stopWatch)
 	go func() {
@@ -74,28 +77,20 @@ func (d *Download) readPeerMessages(p *peer.Peer) {
 		}
 	}()
 
+	chunk := make([]byte, 32*1024)
 	var buffer []byte
 	for {
-		select {
-		case <-d.ctx.Done():
-			return
-		default:
-		}
-
-		chunk := make([]byte, 1024)
 		n, err := p.Read(chunk)
 		if err != nil {
-			p.RecordFailure()
 			return
-		}
-		if n == 0 {
-			time.Sleep(time.Microsecond)
-			continue
 		}
 		buffer = append(buffer, chunk[:n]...)
 
-		for len(buffer) > 4 {
+		for len(buffer) >= 4 {
 			length := int(binary.BigEndian.Uint32(buffer[:4]))
+			if length > maxMessageLength {
+				return
+			}
 			if length == 0 {
 				buffer = buffer[4:]
 				continue
@@ -111,6 +106,8 @@ func (d *Download) readPeerMessages(p *peer.Peer) {
 
 			d.onMessage(p, msg)
 		}
+
+		buffer = append(buffer[:0:0], buffer...)
 	}
 }
 

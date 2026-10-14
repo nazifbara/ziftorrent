@@ -27,9 +27,17 @@ func (p *Peer) Read(b []byte) (int, error) { return p.conn.Read(b) }
 
 func (p *Peer) Write(b []byte) (int, error) { return p.conn.Write(b) }
 
-func (p *Peer) Close() error { return p.conn.Close() }
+// Close closes the connection and marks the peer as done.
+func (p *Peer) Close() error {
+	p.markDone()
+	return p.conn.Close()
+}
 
 func (p *Peer) Done() <-chan struct{} { return p.done }
+
+func (p *Peer) Conn() *net.TCPConn {
+	return p.conn
+}
 
 func (p *Peer) Address() *net.TCPAddr {
 	if p == nil || p.addr == nil {
