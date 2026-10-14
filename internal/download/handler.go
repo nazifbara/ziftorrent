@@ -258,15 +258,13 @@ func (d *Download) writeAtGlobal(globalBegin int64, data []byte) error {
 // writeAt writes as much of data as fits in this file, starting at the
 // torrent-wide offset globalBegin, and returns how many bytes it consumed.
 func (f *fileState) writeAt(globalBegin int64, data []byte) (int64, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	offset := globalBegin - f.begin
 	n := min(int64(len(data)), f.size-offset)
 	if _, err := f.file.WriteAt(data[:n], offset); err != nil {
 		return 0, err
 	}
-	f.blocksWrote++
-	if f.blocksWrote == f.numOfBlocks {
+	f.blocksWrote.Add(1)
+	if int(f.blocksWrote.Load()) == f.numOfBlocks {
 		fmt.Printf("✅ %s completed\n", f.name)
 	}
 	return n, nil

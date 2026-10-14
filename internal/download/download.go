@@ -24,10 +24,9 @@ type fileState struct {
 	begin       int64
 	size        int64
 	file        *os.File
-	blocksWrote int
+	blocksWrote atomic.Int64
 	numOfBlocks int
 	name        string
-	mu          sync.Mutex
 }
 
 type Download struct {

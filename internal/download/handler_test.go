@@ -64,8 +64,8 @@ func TestWriteAtGlobalWithinSingleFile(t *testing.T) {
 	if !bytes.Equal(got, data) {
 		t.Fatalf("expected %q at offset 5, got %q", data, got)
 	}
-	if fs.blocksWrote != 1 {
-		t.Fatalf("expected blocksWrote to be incremented to 1, got %d", fs.blocksWrote)
+	if fs.blocksWrote.Load() != 1 {
+		t.Fatalf("expected blocksWrote to be incremented to 1, got %d", fs.blocksWrote.Load())
 	}
 }
 
