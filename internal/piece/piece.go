@@ -36,8 +36,6 @@ func (p *State) BlockRead() int {
 }
 
 func (p *State) BlockCount() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	return p.numOfBlocks
 }
 
@@ -70,7 +68,5 @@ func (p *State) Reset() {
 }
 
 func (p *State) Size() uint64 {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	return p.pieceSize
 }
