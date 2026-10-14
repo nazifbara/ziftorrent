@@ -177,6 +177,7 @@ func (d *Download) download() error {
 
 	saveTicker := time.NewTicker(time.Second)
 	d.wg.Go(func() {
+		startReceiving := false
 		for {
 			totalSnapshot := d.totalDownloaded.Load()
 			select {
@@ -185,15 +186,19 @@ func (d *Download) download() error {
 			case <-d.done:
 				return
 			case <-saveTicker.C:
-				if totalSnapshot == d.totalDownloaded.Load() {
-					continue
+				received := d.totalDownloaded.Load() - totalSnapshot
+				receivedStr := utils.StringByteSize(d.totalDownloaded.Load() - totalSnapshot)
+				if received > 0 {
+					startReceiving = true
+				}
+				total := utils.StringByteSize(d.totalDownloaded.Load())
+				size := utils.StringByteSize(int64(d.torrent.ContentSize))
+				if startReceiving {
+					fmt.Printf("🍰 %s / %s <-- %s/s\n", total, size, receivedStr)
 				}
 				if err := d.config.SaveProgress(); err != nil {
 					fmt.Println("❌ Couldn't save download progress")
-				} else {
-					fmt.Printf("🍰 %s / %s\n", utils.StringByteSize(d.totalDownloaded.Load()), utils.StringByteSize(int64(d.torrent.ContentSize)))
 				}
-
 			}
 		}
 	})
