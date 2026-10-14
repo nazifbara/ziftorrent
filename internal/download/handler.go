@@ -88,14 +88,13 @@ func (d *Download) readPeerMessages(p *peer.Peer) {
 			p.RecordFailure()
 			return
 		}
-
+		if n == 0 {
+			time.Sleep(time.Microsecond)
+			continue
+		}
 		buffer = append(buffer, chunk[:n]...)
 
-		for {
-			if len(buffer) < 4 {
-				break
-			}
-
+		for len(buffer) < 4 {
 			length := int(binary.BigEndian.Uint32(buffer[:4]))
 			if length == 0 {
 				buffer = buffer[4:]
@@ -112,7 +111,6 @@ func (d *Download) readPeerMessages(p *peer.Peer) {
 
 			d.onMessage(p, msg)
 		}
-		time.Sleep(time.Microsecond)
 	}
 }
 
