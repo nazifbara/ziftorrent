@@ -7,16 +7,19 @@ import (
 	"time"
 )
 
+const maxInflightRequest = 15
+
 type Peer struct {
-	conn         *net.TCPConn
-	addr         *net.TCPAddr
-	choked       bool
-	bitfield     []bool
-	done         chan struct{}
-	failureCount atomic.Int32
-	closeOnce    sync.Once
-	rtt          *rttTracker
-	mu           sync.Mutex
+	conn             *net.TCPConn
+	addr             *net.TCPAddr
+	choked           bool
+	bitfield         []bool
+	done             chan struct{}
+	failureCount     atomic.Int32
+	inflightRequests atomic.Int32
+	closeOnce        sync.Once
+	rtt              *rttTracker
+	mu               sync.Mutex
 }
 
 func New(conn *net.TCPConn, addr *net.TCPAddr, pieceCount uint64) *Peer {
@@ -55,7 +58,7 @@ func (p *Peer) Bitfield() []bool { return p.bitfield }
 func (p *Peer) CanRequest(pieceIndex uint32) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return !p.choked && int(pieceIndex) < len(p.bitfield) && p.bitfield[pieceIndex]
+	return !p.choked && int(pieceIndex) < len(p.bitfield) && p.bitfield[pieceIndex] && p.inflightRequests.Load() < maxInflightRequest
 }
 
 func (p *Peer) SetChoked(choked bool) {
@@ -76,6 +79,10 @@ func (p *Peer) SetBitfield(bitfield []bool) {
 	p.mu.Lock()
 	p.bitfield = append(p.bitfield[:0], bitfield...)
 	p.mu.Unlock()
+}
+
+func (p *Peer) RecordRequest(delta int32) {
+	p.inflightRequests.Add(delta)
 }
 
 func (p *Peer) RecordRTT(sample time.Duration) { p.rtt.Record(sample) }

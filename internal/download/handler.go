@@ -17,7 +17,6 @@ func (d *Download) tryRequestPeer(p *peer.Peer, job *job) {
 		d.requeue(job)
 		return
 	}
-
 	req := wire.BuildRequest(job.index, job.begin, d.torrent.BlockLength(job.index, job.begin))
 	sentAt := time.Now()
 	if _, err := p.Write(req); err != nil {
@@ -25,6 +24,7 @@ func (d *Download) tryRequestPeer(p *peer.Peer, job *job) {
 		p.RecordFailure()
 		return
 	}
+	p.RecordRequest(1)
 
 	timeout := p.RequestTimeout()
 	key := pendingKey(job.index, job.begin)
@@ -157,6 +157,7 @@ func (d *Download) onBlockReceived(p *peer.Peer, msg wire.Message) {
 	d.mu.Lock()
 	pr, ok := d.pending[key]
 	if ok {
+		pr.peer.RecordRequest(-1)
 		delete(d.pending, key)
 	}
 	d.mu.Unlock()
