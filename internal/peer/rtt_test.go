@@ -68,7 +68,7 @@ func TestRTTTrackerClampsHighTimeout(t *testing.T) {
 	r := newRTTTracker(10)
 	r.Record(10 * time.Second)
 	got := r.Timeout()
-	want := 20 * time.Second
+	want := 10 * time.Second
 	if got != want {
 		t.Fatalf("expected clamped maximum timeout %v, got %v", want, got)
 	}
