@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/nazifbara/ziftorrent/internal/config"
-	"github.com/nazifbara/ziftorrent/internal/peer"
 	"github.com/nazifbara/ziftorrent/internal/piece"
 	"github.com/nazifbara/ziftorrent/internal/torrent"
 	"github.com/nazifbara/ziftorrent/internal/wire"
@@ -195,7 +194,7 @@ func newBlockTestClient(t *testing.T, content []byte) *Download {
 	for _, begin := range []uint32{0, 5} {
 		c.pending[pendingKey(0, begin)] = &pendingRequest{
 			job:   &job{index: 0, begin: begin},
-			peer:  &peer.Peer{},
+			peer:  newSentPeer(t),
 			timer: time.NewTimer(time.Hour),
 		}
 	}

@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"context"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -10,20 +11,24 @@ import (
 const maxInflightRequest = 15
 
 type Peer struct {
-	conn             *net.TCPConn
-	addr             *net.TCPAddr
-	choked           bool
-	bitfield         []bool
-	done             chan struct{}
-	failureCount     atomic.Int32
-	inflightRequests atomic.Int32
-	closeOnce        sync.Once
-	rtt              *rttTracker
-	mu               sync.Mutex
+	conn         *net.TCPConn
+	addr         *net.TCPAddr
+	choked       bool
+	bitfield     []bool
+	done         chan struct{}
+	failureCount atomic.Int32
+	slots        chan struct{}
+	closeOnce    sync.Once
+	rtt          *rttTracker
+	mu           sync.Mutex
 }
 
 func New(conn *net.TCPConn, addr *net.TCPAddr, pieceCount uint64) *Peer {
-	return &Peer{conn: conn, addr: addr, bitfield: make([]bool, 0, pieceCount), done: make(chan struct{}), rtt: newRTTTracker(100)}
+	return &Peer{
+		conn: conn, addr: addr, bitfield: make([]bool, 0, pieceCount),
+		done: make(chan struct{}), rtt: newRTTTracker(100),
+		slots: make(chan struct{}, maxInflightRequest),
+	}
 }
 
 func (p *Peer) Read(b []byte) (int, error) { return p.conn.Read(b) }
@@ -58,7 +63,7 @@ func (p *Peer) Bitfield() []bool { return p.bitfield }
 func (p *Peer) CanRequest(pieceIndex uint32) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return !p.choked && int(pieceIndex) < len(p.bitfield) && p.bitfield[pieceIndex] && p.inflightRequests.Load() < maxInflightRequest
+	return !p.choked && int(pieceIndex) < len(p.bitfield) && p.bitfield[pieceIndex]
 }
 
 func (p *Peer) SetChoked(choked bool) {
@@ -81,9 +86,22 @@ func (p *Peer) SetBitfield(bitfield []bool) {
 	p.mu.Unlock()
 }
 
-func (p *Peer) RecordRequest(delta int32) {
-	p.inflightRequests.Add(delta)
+func (p *Peer) AcquireSlot(ctx context.Context) bool {
+	select {
+	case p.slots <- struct{}{}:
+		return true
+	case <-ctx.Done():
+	case <-p.done:
+	}
+	return false
 }
+
+func (p *Peer) ReleaseSlot() {
+	<-p.slots
+}
+
+// InflightRequests reports how many request slots are currently held.
+func (p *Peer) InflightRequests() int { return len(p.slots) }
 
 func (p *Peer) RecordRTT(sample time.Duration) { p.rtt.Record(sample) }
 

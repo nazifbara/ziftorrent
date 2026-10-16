@@ -54,7 +54,7 @@ func (d *Download) onTimeout(key string, job *job) {
 	delete(d.pending, key)
 	d.mu.Unlock()
 	if stillPending {
-		pr.peer.RecordRequest(-1)
+		pr.peer.ReleaseSlot()
 		d.requeue(job)
 	}
 }

@@ -15,6 +15,7 @@ import (
 func (d *Download) tryRequestPeer(p *peer.Peer, job *job) {
 	if !p.CanRequest(job.index) {
 		d.requeue(job)
+		p.ReleaseSlot()
 		return
 	}
 	req := wire.BuildRequest(job.index, job.begin, d.torrent.BlockLength(job.index, job.begin))
@@ -22,9 +23,9 @@ func (d *Download) tryRequestPeer(p *peer.Peer, job *job) {
 	if _, err := p.Write(req); err != nil {
 		d.requeue(job)
 		p.RecordFailure()
+		p.ReleaseSlot()
 		return
 	}
-	p.RecordRequest(1)
 
 	timeout := p.RequestTimeout()
 	key := pendingKey(job.index, job.begin)
@@ -45,10 +46,15 @@ func (d *Download) runPeerWorker(p *peer.Peer) {
 	d.wg.Add(1)
 	defer d.wg.Done()
 	for {
+		if !p.AcquireSlot(d.ctx) {
+			return
+		}
 		select {
 		case <-d.ctx.Done():
+			p.ReleaseSlot()
 			return
 		case <-p.Done():
+			p.ReleaseSlot()
 			d.requeueAddress(p.Address())
 			return
 		case job, ok := <-d.queue:
@@ -157,13 +163,14 @@ func (d *Download) onBlockReceived(p *peer.Peer, msg wire.Message) {
 	d.mu.Lock()
 	pr, ok := d.pending[key]
 	if ok {
-		pr.peer.RecordRequest(-1)
 		delete(d.pending, key)
 	}
 	d.mu.Unlock()
 
 	if !ok {
 		return
+	} else {
+		pr.peer.ReleaseSlot()
 	}
 
 	pr.timer.Stop()

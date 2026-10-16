@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/nazifbara/ziftorrent/internal/config"
-	"github.com/nazifbara/ziftorrent/internal/peer"
 	"github.com/nazifbara/ziftorrent/internal/piece"
 	"github.com/nazifbara/ziftorrent/internal/torrent"
 )
@@ -48,7 +47,7 @@ func TestTimeoutRequeuesPendingJob(t *testing.T) {
 	d := newQueueDownload(t, 1)
 	j := &job{index: 2, begin: 100}
 	key := pendingKey(j.index, j.begin)
-	d.pending[key] = &pendingRequest{job: j, peer: &peer.Peer{}}
+	d.pending[key] = &pendingRequest{job: j, peer: newSentPeer(t)}
 
 	d.onTimeout(key, j)
 	if _, ok := d.pending[key]; ok {

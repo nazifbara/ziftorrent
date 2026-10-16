@@ -1,6 +1,7 @@
 package download
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -9,7 +10,7 @@ import (
 )
 
 // newInflightPeer returns a peer that is unchoked and has piece 0, so
-// CanRequest(0) only depends on its in-flight request count.
+// CanRequest(0) only depends on its choke state.
 func newInflightPeer(t *testing.T, conn *net.TCPConn) *peer.Peer {
 	t.Helper()
 	p := peer.New(conn, nil, 1)
@@ -17,21 +18,36 @@ func newInflightPeer(t *testing.T, conn *net.TCPConn) *peer.Peer {
 	return p
 }
 
-// inflight infers the peer's in-flight request count from how many more
-// requests CanRequest admits before hitting the cap, then restores it.
-func inflight(t *testing.T, p *peer.Peer) int {
+// newSentPeer returns a peer holding one slot, as if it had just been sent a
+// request.
+func newSentPeer(t *testing.T) *peer.Peer {
 	t.Helper()
-	const capacity = 15
-	free := 0
-	for p.CanRequest(0) {
-		p.RecordRequest(1)
-		free++
-		if free > 10*capacity {
-			t.Fatalf("in-flight count never reached the cap; it has drifted far below zero")
-		}
+	p := newInflightPeer(t, nil)
+	acquireSlot(t, p)
+	return p
+}
+
+func acquireSlot(t *testing.T, p *peer.Peer) {
+	t.Helper()
+	if !p.AcquireSlot(context.Background()) {
+		t.Fatal("failed to acquire a request slot")
 	}
-	p.RecordRequest(int32(-free))
-	return capacity - free
+}
+
+// within fails the test if fn does not return in time. ReleaseSlot blocks when
+// no slot is held, so a double release shows up as a hang.
+func within(t *testing.T, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		fn()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("call blocked; a slot was probably released without being held")
+	}
 }
 
 // tcpConnPair returns the client side of a loopback TCP connection; the server
@@ -77,72 +93,72 @@ func stopPendingTimers(t *testing.T, d *Download) {
 	})
 }
 
-func TestTryRequestPeerCountsSentRequest(t *testing.T) {
+func TestTryRequestPeerKeepsSlotForSentRequest(t *testing.T) {
 	d := newQueueDownload(t, 1)
 	stopPendingTimers(t, d)
 	p := newInflightPeer(t, tcpConnPair(t))
+	acquireSlot(t, p)
 
-	d.tryRequestPeer(p, &job{index: 0, begin: 0})
+	within(t, func() { d.tryRequestPeer(p, &job{index: 0, begin: 0}) })
 
-	if got := inflight(t, p); got != 1 {
+	if got := p.InflightRequests(); got != 1 {
 		t.Fatalf("expected 1 in-flight request after a successful send, got %d", got)
 	}
 }
 
-func TestTryRequestPeerDoesNotCountFailedWrite(t *testing.T) {
+func TestTryRequestPeerReleasesSlotOnFailedWrite(t *testing.T) {
 	d := newQueueDownload(t, 1)
 	conn := tcpConnPair(t)
 	conn.Close()
 	p := newInflightPeer(t, conn)
+	acquireSlot(t, p)
 
-	d.tryRequestPeer(p, &job{index: 0, begin: 0})
+	within(t, func() { d.tryRequestPeer(p, &job{index: 0, begin: 0}) })
 
-	if got := inflight(t, p); got != 0 {
-		t.Fatalf("expected a failed write not to count as in flight, got %d", got)
+	if got := p.InflightRequests(); got != 0 {
+		t.Fatalf("expected a failed write to release its slot, got %d in flight", got)
 	}
 	if len(d.pending) != 0 {
 		t.Fatalf("expected no pending request after a failed write, got %d", len(d.pending))
 	}
 }
 
-func TestTryRequestPeerDoesNotCountRefusedRequest(t *testing.T) {
+func TestTryRequestPeerReleasesSlotOnRefusedRequest(t *testing.T) {
 	d := newQueueDownload(t, 1)
 	p := newInflightPeer(t, tcpConnPair(t))
 	p.SetChoked(true)
+	acquireSlot(t, p)
 
-	d.tryRequestPeer(p, &job{index: 0, begin: 0})
+	within(t, func() { d.tryRequestPeer(p, &job{index: 0, begin: 0}) })
 
-	p.SetChoked(false)
-	if got := inflight(t, p); got != 0 {
-		t.Fatalf("expected a request refused by CanRequest not to count, got %d", got)
+	if got := p.InflightRequests(); got != 0 {
+		t.Fatalf("expected a request refused by CanRequest to release its slot, got %d in flight", got)
 	}
 }
 
 func TestBlockReceivedReleasesInflightRequest(t *testing.T) {
 	content := []byte("0123456789")
 	c := newBlockTestClient(t, content)
-	p := newInflightPeer(t, nil)
+	p := newSentPeer(t)
 	c.pending[pendingKey(0, 0)].peer = p
-	p.RecordRequest(1)
 
-	c.onBlockReceived(p, blockMessage(t, 0, 0, content[:5]))
+	within(t, func() { c.onBlockReceived(p, blockMessage(t, 0, 0, content[:5])) })
 
-	if got := inflight(t, p); got != 0 {
+	if got := p.InflightRequests(); got != 0 {
 		t.Fatalf("expected the received block to release its request, got %d in flight", got)
 	}
 }
 
 func TestTimeoutReleasesInflightRequest(t *testing.T) {
 	d := newQueueDownload(t, 1)
-	p := newInflightPeer(t, nil)
+	p := newSentPeer(t)
 	j := &job{index: 0, begin: 0}
 	key := pendingKey(j.index, j.begin)
 	d.pending[key] = &pendingRequest{job: j, peer: p, timer: time.NewTimer(time.Hour)}
-	p.RecordRequest(1)
 
-	d.onTimeout(key, j)
+	within(t, func() { d.onTimeout(key, j) })
 
-	if got := inflight(t, p); got != 0 {
+	if got := p.InflightRequests(); got != 0 {
 		t.Fatalf("expected the timeout to release its request, got %d in flight", got)
 	}
 }
@@ -150,15 +166,16 @@ func TestTimeoutReleasesInflightRequest(t *testing.T) {
 func TestLateBlockAfterTimeoutDoesNotReleaseTwice(t *testing.T) {
 	content := []byte("0123456789")
 	c := newBlockTestClient(t, content)
-	p := newInflightPeer(t, nil)
+	p := newSentPeer(t)
 	key := pendingKey(0, 0)
 	c.pending[key].peer = p
-	p.RecordRequest(1)
 
-	c.onTimeout(key, c.pending[key].job)
-	c.onBlockReceived(p, blockMessage(t, 0, 0, content[:5]))
+	within(t, func() {
+		c.onTimeout(key, c.pending[key].job)
+		c.onBlockReceived(p, blockMessage(t, 0, 0, content[:5]))
+	})
 
-	if got := inflight(t, p); got != 0 {
+	if got := p.InflightRequests(); got != 0 {
 		t.Fatalf("expected 0 in flight after a timeout and a late block, got %d", got)
 	}
 }
@@ -166,16 +183,17 @@ func TestLateBlockAfterTimeoutDoesNotReleaseTwice(t *testing.T) {
 func TestTimeoutAfterBlockDoesNotReleaseTwice(t *testing.T) {
 	content := []byte("0123456789")
 	c := newBlockTestClient(t, content)
-	p := newInflightPeer(t, nil)
+	p := newSentPeer(t)
 	key := pendingKey(0, 0)
 	j := c.pending[key].job
 	c.pending[key].peer = p
-	p.RecordRequest(1)
 
-	c.onBlockReceived(p, blockMessage(t, 0, 0, content[:5]))
-	c.onTimeout(key, j)
+	within(t, func() {
+		c.onBlockReceived(p, blockMessage(t, 0, 0, content[:5]))
+		c.onTimeout(key, j)
+	})
 
-	if got := inflight(t, p); got != 0 {
+	if got := p.InflightRequests(); got != 0 {
 		t.Fatalf("expected 0 in flight after a block and a stale timeout, got %d", got)
 	}
 }
@@ -183,25 +201,23 @@ func TestTimeoutAfterBlockDoesNotReleaseTwice(t *testing.T) {
 func TestLateBlockFromPreviousPeerReleasesCurrentOwner(t *testing.T) {
 	content := []byte("0123456789")
 	c := newBlockTestClient(t, content)
-	a := newInflightPeer(t, nil)
-	b := newInflightPeer(t, nil)
+	a := newSentPeer(t)
 	key := pendingKey(0, 0)
 	c.pending[key].peer = a
-	a.RecordRequest(1)
 
 	// a's request times out and the job is handed to b.
 	j := c.pending[key].job
-	c.onTimeout(key, j)
+	within(t, func() { c.onTimeout(key, j) })
+	b := newSentPeer(t)
 	c.pending[key] = &pendingRequest{job: j, peer: b, timer: time.NewTimer(time.Hour)}
-	b.RecordRequest(1)
 
 	// a's block shows up late and satisfies b's pending entry.
-	c.onBlockReceived(a, blockMessage(t, 0, 0, content[:5]))
+	within(t, func() { c.onBlockReceived(a, blockMessage(t, 0, 0, content[:5])) })
 
-	if got := inflight(t, a); got != 0 {
+	if got := a.InflightRequests(); got != 0 {
 		t.Fatalf("expected the previous peer to stay at 0 in flight, got %d", got)
 	}
-	if got := inflight(t, b); got != 0 {
+	if got := b.InflightRequests(); got != 0 {
 		t.Fatalf("expected the current owner's request to be released, got %d in flight", got)
 	}
 }
@@ -209,13 +225,61 @@ func TestLateBlockFromPreviousPeerReleasesCurrentOwner(t *testing.T) {
 func TestUnsolicitedBlockDoesNotReleaseInflightRequest(t *testing.T) {
 	content := []byte("0123456789")
 	c := newBlockTestClient(t, content)
-	p := newInflightPeer(t, nil)
+	p := newSentPeer(t)
 	delete(c.pending, pendingKey(0, 0))
-	p.RecordRequest(1)
 
-	c.onBlockReceived(p, blockMessage(t, 0, 0, content[:5]))
+	within(t, func() { c.onBlockReceived(p, blockMessage(t, 0, 0, content[:5])) })
 
-	if got := inflight(t, p); got != 1 {
+	if got := p.InflightRequests(); got != 1 {
 		t.Fatalf("expected an unrequested block not to release anything, got %d in flight", got)
+	}
+}
+
+// startPeerWorker runs runPeerWorker and returns a channel closed when it exits.
+func startPeerWorker(d *Download, p *peer.Peer) <-chan struct{} {
+	exited := make(chan struct{})
+	go func() {
+		d.runPeerWorker(p)
+		close(exited)
+	}()
+	return exited
+}
+
+func TestPeerWorkerExitsOnCancelWithEmptyQueue(t *testing.T) {
+	d := newQueueDownload(t, 1)
+	p := newInflightPeer(t, tcpConnPair(t))
+	exited := startPeerWorker(d, p)
+
+	d.cancel()
+
+	select {
+	case <-exited:
+	case <-time.After(time.Second):
+		t.Fatal("peer worker kept waiting on an empty queue after cancel")
+	}
+}
+
+func TestPeerWorkerRequeuesAddressWhenPeerCloses(t *testing.T) {
+	d := newQueueDownload(t, 1)
+	d.addrQueue = make(chan *net.TCPAddr, 1)
+	conn := tcpConnPair(t)
+	addr := conn.RemoteAddr().(*net.TCPAddr)
+	p := peer.New(conn, addr, 1)
+	exited := startPeerWorker(d, p)
+
+	p.Close()
+
+	select {
+	case <-exited:
+	case <-time.After(time.Second):
+		t.Fatal("peer worker kept waiting on an empty queue after the peer closed")
+	}
+	select {
+	case got := <-d.addrQueue:
+		if !p.MatchesAddress(got) {
+			t.Fatalf("expected %v to be requeued, got %v", addr, got)
+		}
+	default:
+		t.Fatal("expected the closed peer's address to be requeued")
 	}
 }
