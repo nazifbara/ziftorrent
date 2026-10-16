@@ -126,6 +126,7 @@ func (d *Download) onMessage(p *peer.Peer, msg []byte) {
 	switch message.ID {
 	case 0:
 		p.SetChoked(true)
+		d.dropPendingFor(p)
 	case 1:
 		p.SetChoked(false)
 	case 4:

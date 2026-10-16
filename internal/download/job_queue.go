@@ -27,6 +27,23 @@ func pendingKey(index, begin uint32) string {
 	return fmt.Sprintf("%d:%d", index, begin)
 }
 
+func (d *Download) dropPendingFor(p *peer.Peer) {
+	d.mu.Lock()
+	var dropped []*pendingRequest
+	for key, pr := range d.pending {
+		if pr.peer == p {
+			pr.timer.Stop()
+			dropped = append(dropped, pr)
+			delete(d.pending, key)
+		}
+	}
+	d.mu.Unlock()
+	for _, pr := range dropped {
+		pr.peer.ReleaseSlot()
+		d.requeue(pr.job)
+	}
+}
+
 func (d *Download) enqueue(job *job) {
 	select {
 	case d.queue <- job:

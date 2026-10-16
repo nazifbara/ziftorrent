@@ -30,8 +30,10 @@ func newSentPeer(t *testing.T) *peer.Peer {
 
 func acquireSlot(t *testing.T, p *peer.Peer) {
 	t.Helper()
-	if !p.AcquireSlot(context.Background()) {
-		t.Fatal("failed to acquire a request slot")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if !p.AcquireSlot(ctx) {
+		t.Fatal("failed to acquire a request slot; all slots are held")
 	}
 }
 
