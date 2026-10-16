@@ -15,6 +15,7 @@ func newInflightPeer(t *testing.T, conn *net.TCPConn) *peer.Peer {
 	t.Helper()
 	p := peer.New(conn, nil, 1)
 	p.SetBitfield([]bool{true})
+	p.SetChoked(false)
 	return p
 }
 

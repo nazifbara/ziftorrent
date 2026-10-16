@@ -14,6 +14,7 @@ type Peer struct {
 	conn         *net.TCPConn
 	addr         *net.TCPAddr
 	choked       bool
+	unchoked     chan struct{}
 	bitfield     []bool
 	done         chan struct{}
 	failureCount atomic.Int32
@@ -25,7 +26,9 @@ type Peer struct {
 
 func New(conn *net.TCPConn, addr *net.TCPAddr, pieceCount uint64) *Peer {
 	return &Peer{
-		conn: conn, addr: addr, bitfield: make([]bool, 0, pieceCount),
+		choked:   true,
+		unchoked: make(chan struct{}),
+		conn:     conn, addr: addr, bitfield: make([]bool, 0, pieceCount),
 		done: make(chan struct{}), rtt: newRTTTracker(100),
 		slots: make(chan struct{}, maxInflightRequest),
 	}
@@ -68,8 +71,16 @@ func (p *Peer) CanRequest(pieceIndex uint32) bool {
 
 func (p *Peer) SetChoked(choked bool) {
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.choked == choked {
+		return
+	}
 	p.choked = choked
-	p.mu.Unlock()
+	if choked {
+		p.unchoked = make(chan struct{})
+	} else {
+		close(p.unchoked)
+	}
 }
 
 func (p *Peer) SetHave(pieceIndex uint32) {
@@ -84,6 +95,19 @@ func (p *Peer) SetBitfield(bitfield []bool) {
 	p.mu.Lock()
 	p.bitfield = append(p.bitfield[:0], bitfield...)
 	p.mu.Unlock()
+}
+
+func (p *Peer) WaitUnchoked(ctx context.Context) bool {
+	p.mu.Lock()
+	ch := p.unchoked
+	p.mu.Unlock()
+	select {
+	case <-ch:
+		return true
+	case <-ctx.Done():
+	case <-p.done:
+	}
+	return false
 }
 
 func (p *Peer) AcquireSlot(ctx context.Context) bool {

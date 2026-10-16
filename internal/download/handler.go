@@ -44,7 +44,7 @@ func (d *Download) tryRequestPeer(p *peer.Peer, job *job) {
 
 func (d *Download) runPeerWorker(p *peer.Peer) {
 	for {
-		if !p.AcquireSlot(d.ctx) {
+		if !p.WaitUnchoked(d.ctx) || !p.AcquireSlot(d.ctx) {
 			if d.ctx.Err() == nil {
 				d.requeueAddress(p.Address())
 			}
