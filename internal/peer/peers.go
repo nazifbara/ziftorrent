@@ -103,7 +103,10 @@ func (p *Peer) ReleaseSlot() {
 // InflightRequests reports how many request slots are currently held.
 func (p *Peer) InflightRequests() int { return len(p.slots) }
 
-func (p *Peer) RecordRTT(sample time.Duration) { p.rtt.Record(sample) }
+func (p *Peer) RecordRTT(sample time.Duration) {
+	p.rtt.Record(sample)
+	p.failureCount.Store(0)
+}
 
 func (p *Peer) RequestTimeout() time.Duration { return p.rtt.Timeout() }
 

@@ -43,10 +43,11 @@ func (d *Download) tryRequestPeer(p *peer.Peer, job *job) {
 }
 
 func (d *Download) runPeerWorker(p *peer.Peer) {
-	d.wg.Add(1)
-	defer d.wg.Done()
 	for {
 		if !p.AcquireSlot(d.ctx) {
+			if d.ctx.Err() == nil {
+				d.requeueAddress(p.Address())
+			}
 			return
 		}
 		select {
@@ -150,7 +151,7 @@ func (d *Download) onBitfield(p *peer.Peer, msg wire.Message) {
 	}
 	payload := wire.ParseBitfieldPayload(msg.Payload)
 	p.SetBitfield(payload.Bitfield)
-	go d.runPeerWorker(p)
+	d.wg.Go(func() { d.runPeerWorker(p) })
 }
 
 func (d *Download) onBlockReceived(p *peer.Peer, msg wire.Message) {

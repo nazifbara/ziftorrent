@@ -50,3 +50,40 @@ func TestAcquireSlotOnPeerDoneDoesNotReleaseHeldSlot(t *testing.T) {
 
 	assertAcquireFailsWithoutReleasing(t, p, context.Background())
 }
+
+func isDone(p *Peer) bool {
+	select {
+	case <-p.Done():
+		return true
+	default:
+		return false
+	}
+}
+
+func TestRecordFailureClosesPeerAfterSixFailures(t *testing.T) {
+	p := New(nil, nil, 1)
+	for range 5 {
+		p.RecordFailure()
+	}
+	if isDone(p) {
+		t.Fatal("expected the peer to survive 5 failures")
+	}
+	p.RecordFailure()
+	if !isDone(p) {
+		t.Fatal("expected the peer to be closed after 6 failures")
+	}
+}
+
+func TestRecordRTTResetsFailures(t *testing.T) {
+	p := New(nil, nil, 1)
+	for range 5 {
+		p.RecordFailure()
+	}
+	p.RecordRTT(100 * time.Millisecond)
+	for range 5 {
+		p.RecordFailure()
+	}
+	if isDone(p) {
+		t.Fatal("expected a recorded RTT to reset the failure count")
+	}
+}
