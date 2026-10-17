@@ -282,7 +282,7 @@ func TestPeerWorkerRequeuesAddressWhenPeerCloses(t *testing.T) {
 		if !p.MatchesAddress(got) {
 			t.Fatalf("expected %v to be requeued, got %v", addr, got)
 		}
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("expected the closed peer's address to be requeued")
 	}
 }
