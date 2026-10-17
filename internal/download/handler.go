@@ -118,6 +118,27 @@ func (d *Download) readPeerMessages(p *peer.Peer) {
 	}
 }
 
+func (d *Download) KeepPeerAlive(p *peer.Peer) {
+	ticker := time.NewTicker(keepAliveInterval)
+	defer ticker.Stop()
+	keepAlive := wire.BuildKeepAlive()
+	for {
+		select {
+		case <-ticker.C:
+			if p.Choked() {
+				if _, err := p.Write(keepAlive); err != nil {
+					p.Close()
+					return
+				}
+			}
+		case <-d.ctx.Done():
+			return
+		case <-p.Done():
+			return
+		}
+	}
+}
+
 func (d *Download) onMessage(p *peer.Peer, msg []byte) {
 	message, err := wire.ParseMessage(msg)
 	if err != nil {
@@ -147,12 +168,8 @@ func (d *Download) onHave(p *peer.Peer, msg wire.Message) {
 }
 
 func (d *Download) onBitfield(p *peer.Peer, msg wire.Message) {
-	if len(p.Bitfield()) > 0 {
-		return
-	}
 	payload := wire.ParseBitfieldPayload(msg.Payload)
 	p.SetBitfield(payload.Bitfield)
-	d.wg.Go(func() { d.runPeerWorker(p) })
 }
 
 func (d *Download) onBlockReceived(p *peer.Peer, msg wire.Message) {

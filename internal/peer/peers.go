@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-const maxInflightRequest = 15
+const (
+	maxInflightRequest = 15
+	unchokeTimeout     = 90 * time.Second
+)
 
 type Peer struct {
 	conn         *net.TCPConn
@@ -28,7 +31,7 @@ func New(conn *net.TCPConn, addr *net.TCPAddr, pieceCount uint64) *Peer {
 	return &Peer{
 		choked:   true,
 		unchoked: make(chan struct{}),
-		conn:     conn, addr: addr, bitfield: make([]bool, 0, pieceCount),
+		conn:     conn, addr: addr, bitfield: make([]bool, pieceCount),
 		done: make(chan struct{}), rtt: newRTTTracker(100),
 		slots: make(chan struct{}, maxInflightRequest),
 	}
@@ -61,8 +64,6 @@ func (p *Peer) MatchesAddress(addr *net.TCPAddr) bool {
 	return p != nil && p.addr != nil && addr != nil && p.addr.IP.Equal(addr.IP) && p.addr.Port == addr.Port
 }
 
-func (p *Peer) Bitfield() []bool { return p.bitfield }
-
 func (p *Peer) CanRequest(pieceIndex uint32) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -93,16 +94,23 @@ func (p *Peer) SetHave(pieceIndex uint32) {
 
 func (p *Peer) SetBitfield(bitfield []bool) {
 	p.mu.Lock()
-	p.bitfield = append(p.bitfield[:0], bitfield...)
+	copy(p.bitfield, bitfield)
 	p.mu.Unlock()
 }
+
+func (p *Peer) Choked() bool { return p.choked }
 
 func (p *Peer) WaitUnchoked(ctx context.Context) bool {
 	p.mu.Lock()
 	ch := p.unchoked
 	p.mu.Unlock()
+
+	timer := time.AfterFunc(unchokeTimeout, func() {
+		p.Close()
+	})
 	select {
 	case <-ch:
+		timer.Stop()
 		return true
 	case <-ctx.Done():
 	case <-p.done:

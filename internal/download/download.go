@@ -20,6 +20,12 @@ import (
 	"github.com/nazifbara/ziftorrent/internal/wire"
 )
 
+const (
+	defaultAddressRequeueDelay = 2 * time.Minute
+	keepAliveInterval          = time.Minute
+	unchokeTimeout             = 90 * time.Second
+)
+
 type fileState struct {
 	begin       int64
 	size        int64
@@ -30,24 +36,25 @@ type fileState struct {
 }
 
 type Download struct {
-	mu              sync.Mutex
-	torrent         *torrent.Torrent
-	queue           chan *job
-	addrQueue       chan *net.TCPAddr
-	pending         map[string]*pendingRequest
-	pieces          []*piece.State
-	startedAt       time.Time
-	totalDownloaded atomic.Int64
-	done            chan struct{}
-	doneOnce        sync.Once
-	tracker         *tracker.Tracker
-	destination     string
-	files           []*fileState
-	ctx             context.Context
-	cancel          context.CancelFunc
-	wg              sync.WaitGroup
-	filesOnce       sync.Once
-	config          *config.Config
+	mu                  sync.Mutex
+	torrent             *torrent.Torrent
+	queue               chan *job
+	addrQueue           chan *net.TCPAddr
+	pending             map[string]*pendingRequest
+	pieces              []*piece.State
+	startedAt           time.Time
+	totalDownloaded     atomic.Int64
+	done                chan struct{}
+	doneOnce            sync.Once
+	tracker             *tracker.Tracker
+	destination         string
+	files               []*fileState
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	wg                  sync.WaitGroup
+	filesOnce           sync.Once
+	config              *config.Config
+	addressRequeueDelay time.Duration
 }
 
 func New(t *torrent.Torrent, c *config.Config) *Download {
@@ -64,15 +71,16 @@ func New(t *torrent.Torrent, c *config.Config) *Download {
 		pieces[i] = piece.New(size, c.BlockSize)
 	}
 	return &Download{
-		torrent: t,
-		pieces:  pieces,
-		queue:   make(chan *job, t.NumOfBlocks),
-		pending: make(map[string]*pendingRequest),
-		ctx:     ctx,
-		cancel:  cancel,
-		files:   make([]*fileState, len(t.Files)),
-		done:    make(chan struct{}),
-		config:  c,
+		torrent:             t,
+		pieces:              pieces,
+		queue:               make(chan *job, t.NumOfBlocks),
+		pending:             make(map[string]*pendingRequest),
+		ctx:                 ctx,
+		cancel:              cancel,
+		files:               make([]*fileState, len(t.Files)),
+		done:                make(chan struct{}),
+		config:              c,
+		addressRequeueDelay: defaultAddressRequeueDelay,
 	}
 }
 
@@ -142,7 +150,7 @@ func (d *Download) Start(trackerURL string) error {
 	}
 	d.startedAt = time.Now()
 	d.tracker = foundTracker
-	fmt.Println("⬇️ Downloading...")
+	fmt.Println("⬇️ Preparing for download...")
 	return d.download()
 }
 
@@ -224,12 +232,17 @@ func (d *Download) download() error {
 					d.requeueAddress(address)
 					continue
 				}
+
+				d.wg.Go(func() { d.readPeerMessages(p) })
+				d.wg.Go(func() { d.KeepPeerAlive(p) })
+				d.wg.Go(func() { d.runPeerWorker(p) })
+
 				if _, err := p.Write(wire.BuildInterested()); err != nil {
 					p.Close()
 					d.requeueAddress(address)
 					continue
 				}
-				d.wg.Go(func() { d.readPeerMessages(p) })
+
 			}
 		}
 	}()
@@ -279,11 +292,13 @@ func (d *Download) connectToPeer(address *net.TCPAddr) (*peer.Peer, error) {
 }
 
 func (d *Download) requeueAddress(address *net.TCPAddr) {
-	select {
-	case d.addrQueue <- address:
-	case <-d.ctx.Done():
-	default:
-	}
+	time.AfterFunc(d.addressRequeueDelay, func() {
+		select {
+		case d.addrQueue <- address:
+		case <-d.ctx.Done():
+		default:
+		}
+	})
 }
 
 func (d *Download) closeFiles() {
