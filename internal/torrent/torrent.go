@@ -106,16 +106,6 @@ type Torrent struct {
 	AnnounceList   [][]string
 }
 
-// BlockLength returns the length of the block that starts at begin inside
-// piece pieceIdx: a full config.BlockSize, or whatever is left of the piece.
-func (t *Torrent) BlockLength(pieceIdx, begin uint32) uint32 {
-	pieceSize := uint32(t.PieceSize)
-	if pieceIdx == uint32(t.NumOfPieces-1) {
-		pieceSize = uint32(t.FinalPieceSize)
-	}
-	return min(pieceSize-begin, config.BlockSize)
-}
-
 // Open reads and parses the .torrent file at filePath.
 func Open(filePath string) (*Torrent, error) {
 	f, err := os.Open(filePath)

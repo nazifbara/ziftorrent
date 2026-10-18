@@ -1,9 +1,7 @@
 package download
 
 import (
-	"fmt"
 	"testing"
-	"time"
 
 	"github.com/nazifbara/ziftorrent/internal/peer"
 )
@@ -21,34 +19,16 @@ func isClosed(p *peer.Peer) bool {
 	}
 }
 
-// timeOutRequest registers a request sent to p and lets it time out. Each call
-// uses a fresh key so it never collides with real blocks.
+// timeOutRequest sends p a request and lets it time out.
 func timeOutRequest(t *testing.T, d *Download, p *peer.Peer) {
 	t.Helper()
-	acquireSlot(t, p)
-	d.mu.Lock()
-	n := len(d.pending)
-	d.mu.Unlock()
-	j := &job{index: 1000, begin: uint32(n)}
-	key := fmt.Sprintf("timeout:%p:%d:%d", p, n, time.Now().UnixNano())
-	d.mu.Lock()
-	d.pending[key] = &pendingRequest{job: j, peer: p, timer: time.NewTimer(time.Hour)}
-	d.mu.Unlock()
-	within(t, func() { d.onTimeout(key, j) })
-}
-
-// newFailureTestClient is a block test client whose queue can absorb every
-// requeued job without spawning goroutines.
-func newFailureTestClient(t *testing.T, content []byte) *Download {
-	t.Helper()
-	c := newBlockTestClient(t, content)
-	c.queue = make(chan *job, 64)
-	return c
+	key := addPending(t, d, p)
+	within(t, func() { d.onTimeout(key) })
 }
 
 func TestRepeatedTimeoutsCloseStallingPeer(t *testing.T) {
-	d := newFailureTestClient(t, []byte("0123456789"))
-	p := newInflightPeer(t, nil)
+	d := newTestDownload(t, 1)
+	p := newInflightPeer(t, d, nil)
 
 	for range peerFailureLimit {
 		timeOutRequest(t, d, p)
@@ -65,15 +45,13 @@ func TestRepeatedTimeoutsCloseStallingPeer(t *testing.T) {
 
 func TestStaleTimeoutIsNotAFailure(t *testing.T) {
 	content := []byte("0123456789")
-	d := newFailureTestClient(t, content)
-	p := newSentPeer(t)
-	key := pendingKey(0, 0)
-	j := d.pending[key].job
-	d.pending[key].peer = p
+	d := newBlockTestClient(t, content)
+	p := newInflightPeer(t, d, nil)
+	key := addPending(t, d, p)
 
 	within(t, func() { d.onBlockReceived(p, blockMessage(t, 0, 0, content[:5])) })
 	for range peerFailureLimit + 1 {
-		within(t, func() { d.onTimeout(key, j) })
+		within(t, func() { d.onTimeout(key) })
 	}
 
 	if isClosed(p) {
@@ -83,15 +61,14 @@ func TestStaleTimeoutIsNotAFailure(t *testing.T) {
 
 func TestReceivedBlockResetsTimeoutFailures(t *testing.T) {
 	content := []byte("0123456789")
-	d := newFailureTestClient(t, content)
-	p := newInflightPeer(t, nil)
+	d := newBlockTestClient(t, content)
+	p := newInflightPeer(t, d, nil)
 
 	for range peerFailureLimit {
 		timeOutRequest(t, d, p)
 	}
-	acquireSlot(t, p)
-	d.pending[pendingKey(0, 0)].peer = p
-	within(t, func() { d.onBlockReceived(p, blockMessage(t, 0, 0, content[:5])) })
+	key := addPending(t, d, p)
+	within(t, func() { d.onBlockReceived(p, blockMessage(t, 0, uint32(key.begin), content[key.begin:key.begin+5])) })
 	for range peerFailureLimit {
 		timeOutRequest(t, d, p)
 	}
@@ -103,15 +80,16 @@ func TestReceivedBlockResetsTimeoutFailures(t *testing.T) {
 
 func TestLateBlockDoesNotResetPreviousPeerFailures(t *testing.T) {
 	content := []byte("0123456789")
-	d := newFailureTestClient(t, content)
-	a := newInflightPeer(t, nil)
+	d := newBlockTestClient(t, content)
+	a := newInflightPeer(t, d, nil)
 
 	for range peerFailureLimit {
 		timeOutRequest(t, d, a)
 	}
-	// The block is now owned by b; a's late copy satisfies b's request.
-	d.pending[pendingKey(0, 0)].peer = newSentPeer(t)
-	within(t, func() { d.onBlockReceived(a, blockMessage(t, 0, 0, content[:5])) })
+	// The block is now requested from b; a's late copy answers b's request.
+	b := newInflightPeer(t, d, newConn(t))
+	key := addPending(t, d, b)
+	within(t, func() { d.onBlockReceived(a, blockMessage(t, 0, uint32(key.begin), content[key.begin:key.begin+5])) })
 	timeOutRequest(t, d, a)
 
 	if !isClosed(a) {
@@ -120,9 +98,9 @@ func TestLateBlockDoesNotResetPreviousPeerFailures(t *testing.T) {
 }
 
 func TestTimeoutFailureCountsAgainstRequestOwner(t *testing.T) {
-	d := newFailureTestClient(t, []byte("0123456789"))
-	owner := newInflightPeer(t, nil)
-	other := newInflightPeer(t, nil)
+	d := newTestDownload(t, 1)
+	owner := newInflightPeer(t, d, nil)
+	other := newInflightPeer(t, d, nil)
 
 	for range peerFailureLimit + 1 {
 		timeOutRequest(t, d, owner)

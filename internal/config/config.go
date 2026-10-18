@@ -14,39 +14,39 @@ import (
 )
 
 const (
-	BlockSize        uint32 = 16384
-	progressFileName        = "progress"
+	BlockSize        int = 16384
+	progressFileName     = "progress"
 )
 
 type ProgressRange struct {
-	Start int64
-	End   int64
+	Start int
+	End   int
 }
 
 type Config struct {
 	mux            sync.Mutex
 	progressRanges []ProgressRange
 	dirPath        string
-	BlockSize      uint32
+	BlockSize      int
 }
 
 func (c *Config) GetProgressRanges() []ProgressRange {
 	return c.progressRanges
 }
 
-func (c *Config) RecordProgress(globalBegin int64, blockSize uint32) {
+func (c *Config) RecordProgress(globalBegin int, blockSize int) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 
 	newItem := ProgressRange{
 		Start: globalBegin,
-		End:   globalBegin + int64(blockSize),
+		End:   globalBegin + blockSize,
 	}
 
 	ranges := c.progressRanges
 
 	// Find the correct insertion index to keep the slice sorted by Start
-	idx, _ := slices.BinarySearchFunc(ranges, newItem.Start, func(r ProgressRange, target int64) int {
+	idx, _ := slices.BinarySearchFunc(ranges, newItem.Start, func(r ProgressRange, target int) int {
 		return cmp.Compare(r.Start, target)
 	})
 

@@ -2,50 +2,82 @@ package piece
 
 import (
 	"testing"
+
+	"github.com/nazifbara/ziftorrent/internal/peer"
 )
 
-func TestAddBlockCompletesPiece(t *testing.T) {
-	p := New(4, 2)
-	if done, err := p.AddBlock(0, []byte{1, 2}); err != nil || done {
-		t.Fatalf("first block: done=%v err=%v", done, err)
+func TestNewSplitsPieceIntoBlocks(t *testing.T) {
+	p := New(3, 10, 4)
+	if p.BlockCount() != 3 || p.Missing() != 3 || p.Started() || p.IsDone() {
+		t.Fatalf("unexpected new piece: blocks=%d missing=%d", p.BlockCount(), p.Missing())
 	}
-	done, err := p.AddBlock(2, []byte{3, 4})
-	if err != nil || !done {
-		t.Fatalf("second block: done=%v err=%v", done, err)
-	}
-	if !p.IsDone() {
-		t.Fatal("expected piece to report done")
+	for i, want := range []Block{{Begin: 0, Length: 4}, {Begin: 4, Length: 4}, {Begin: 8, Length: 2}} {
+		if b := p.Block(i); b.Begin != want.Begin || b.Length != want.Length {
+			t.Fatalf("block %d: got begin=%d length=%d, want %+v", i, b.Begin, b.Length, want)
+		}
 	}
 }
 
-func TestAddBlockRejectsOutOfBounds(t *testing.T) {
-	p := New(4, 2)
-	if _, err := p.AddBlock(3, []byte{1, 2}); err == nil {
-		t.Fatal("expected an error for a block past the piece boundary")
+func TestBlockAtRejectsUnalignedOffsets(t *testing.T) {
+	p := New(0, 10, 4)
+	for begin, want := range map[int]int{0: 0, 4: 1, 8: 2, 2: -1, 12: -1, -4: -1} {
+		if got := p.BlockAt(begin); got != want {
+			t.Errorf("BlockAt(%d): got %d, want %d", begin, got, want)
+		}
 	}
-	if p.BlockRead() != 0 {
-		t.Fatalf("expected rejected block not to be counted, got %d", p.BlockRead())
+}
+
+func TestReceiveCompletesPieceOnce(t *testing.T) {
+	p := New(0, 4, 2)
+	if _, fresh := p.Receive(0); !fresh || p.IsDone() {
+		t.Fatalf("first block: fresh=%v done=%v", fresh, p.IsDone())
+	}
+	if _, fresh := p.Receive(0); fresh {
+		t.Fatal("expected the same block received twice to be a duplicate")
+	}
+	if p.IsDone() {
+		t.Fatal("a duplicate block must not complete the piece")
+	}
+	if _, fresh := p.Receive(1); !fresh || !p.IsDone() {
+		t.Fatalf("second block: fresh=%v done=%v", fresh, p.IsDone())
+	}
+}
+
+func TestReleaseReturnsBlockToMissingOnceNobodyHasIt(t *testing.T) {
+	a, b := new(peer.Peer), new(peer.Peer)
+	p := New(0, 4, 2)
+	p.Request(0, a)
+	p.Request(0, b)
+	if p.Missing() != 1 {
+		t.Fatalf("expected 1 missing block, got %d", p.Missing())
+	}
+	p.Release(0, a)
+	if p.Block(0).Status != RequestedBlock {
+		t.Fatal("expected the block to stay requested while b has it")
+	}
+	p.Release(0, b)
+	if p.Block(0).Status != MissingBlock || p.Missing() != 2 {
+		t.Fatalf("expected the block back to missing: status=%v missing=%d", p.Block(0).Status, p.Missing())
+	}
+}
+
+func TestReceiveReturnsRequesters(t *testing.T) {
+	a, b := new(peer.Peer), new(peer.Peer)
+	p := New(0, 4, 2)
+	p.Request(0, a)
+	p.Request(0, b)
+	requesters, fresh := p.Receive(0)
+	if !fresh || len(requesters) != 2 || len(p.Block(0).Requesters) != 0 {
+		t.Fatalf("unexpected receive: fresh=%v requesters=%d", fresh, len(requesters))
 	}
 }
 
 func TestResetClearsProgress(t *testing.T) {
-	p := New(32768, 16384)
-	p.AddBlock(0, make([]byte, 16384))
-	p.AddBlock(16384, make([]byte, 16384))
+	p := New(0, 4, 2)
+	p.Receive(0)
+	p.Receive(1)
 	p.Reset()
-	if p.BlockRead() != 0 || p.IsDone() || p.Size() != 32768 {
-		t.Fatalf("unexpected reset state: read=%d done=%v size=%d", p.BlockRead(), p.IsDone(), p.Size())
-	}
-}
-
-func TestSyncWithOffsetSkipsBlocksAlreadyRead(t *testing.T) {
-	p := New(49152, 16384)
-	p.SyncWithOffset(32768)
-	if p.BlockRead() != 2 {
-		t.Fatalf("expected 2 blocks read after syncing to offset 32768, got %d", p.BlockRead())
-	}
-	done, err := p.AddBlock(32768, make([]byte, 16384))
-	if err != nil || !done {
-		t.Fatalf("last block after sync: done=%v err=%v", done, err)
+	if p.IsDone() || p.Started() || p.Missing() != 2 {
+		t.Fatalf("unexpected reset state: done=%v missing=%d", p.IsDone(), p.Missing())
 	}
 }

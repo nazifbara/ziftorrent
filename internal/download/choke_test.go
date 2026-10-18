@@ -5,54 +5,40 @@ import (
 	"testing"
 	"time"
 
-	"github.com/nazifbara/ziftorrent/internal/config"
 	"github.com/nazifbara/ziftorrent/internal/peer"
 	"github.com/nazifbara/ziftorrent/internal/wire"
 )
 
-// newChokedWorkerSetup returns a download with n queued jobs for piece 0 and a
-// choked peer that has piece 0 and a writable connection.
-func newChokedWorkerSetup(t *testing.T, n int) (*Download, *peer.Peer) {
+// newChokedWorkerSetup returns a download of 10 pieces (20 blocks) and a
+// choked peer that has all of them and a writable connection.
+func newChokedWorkerSetup(t *testing.T) (*Download, *peer.Peer) {
 	t.Helper()
-	d := newQueueDownload(t, n)
+	d := newTestDownload(t, 10)
 	stopPendingTimers(t, d)
-	for i := range n {
-		d.enqueue(&job{index: 0, begin: uint32(i) * config.BlockSize})
-	}
-	p := peer.New(tcpConnPair(t), nil, 1)
-	p.SetBitfield([]bool{true})
+	p := newInflightPeer(t, d, newConn(t))
+	p.SetChoked(true)
 	return d, p
 }
 
-func pendingCount(d *Download) int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return len(d.pending)
-}
-
-func TestPeerWorkerTakesNoJobsWhileChoked(t *testing.T) {
-	d, p := newChokedWorkerSetup(t, 20)
+func TestPeerWorkerSendsNothingWhileChoked(t *testing.T) {
+	d, p := newChokedWorkerSetup(t)
 	exited := startPeerWorker(d, p)
 
 	time.Sleep(100 * time.Millisecond)
 
-	if got := len(d.queue); got != 20 {
-		t.Fatalf("expected a choked peer's worker to leave the queue alone, %d of 20 jobs left", got)
-	}
 	if got := pendingCount(d); got != 0 {
 		t.Fatalf("expected no requests to a choked peer, got %d pending", got)
 	}
+	if got := p.InflightRequests(); got != 0 {
+		t.Fatalf("expected no slots held while choked, got %d", got)
+	}
 
 	d.cancel()
-	select {
-	case <-exited:
-	case <-time.After(time.Second):
-		t.Fatal("peer worker kept waiting for an unchoke after cancel")
-	}
+	expectExit(t, exited, "peer worker kept waiting for an unchoke after cancel")
 }
 
 func TestPeerWorkerSendsRequestsAfterUnchoke(t *testing.T) {
-	d, p := newChokedWorkerSetup(t, 20)
+	d, p := newChokedWorkerSetup(t)
 	exited := startPeerWorker(d, p)
 	t.Cleanup(func() {
 		d.cancel()
@@ -61,31 +47,13 @@ func TestPeerWorkerSendsRequestsAfterUnchoke(t *testing.T) {
 
 	p.SetChoked(false)
 
-	deadline := time.Now().Add(time.Second)
-	for pendingCount(d) < 15 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitFor(t, func() bool { return pendingCount(d) == 15 })
 	if got := pendingCount(d); got != 15 {
 		t.Fatalf("expected the worker to fill all 15 slots after an unchoke, got %d pending", got)
 	}
 	if got := p.InflightRequests(); got != 15 {
 		t.Fatalf("expected 15 slots held, got %d", got)
 	}
-	if got := len(d.queue); got != 5 {
-		t.Fatalf("expected 5 jobs left in the queue, got %d", got)
-	}
-}
-
-// addPending registers a request sent to p for (index, begin), holding one of
-// p's slots, and returns its job.
-func addPending(t *testing.T, d *Download, p *peer.Peer, index, begin uint32) *job {
-	t.Helper()
-	acquireSlot(t, p)
-	j := &job{index: index, begin: begin}
-	d.mu.Lock()
-	d.pending[pendingKey(index, begin)] = &pendingRequest{job: j, peer: p, timer: time.NewTimer(time.Hour)}
-	d.mu.Unlock()
-	return j
 }
 
 func choke(t *testing.T, d *Download, p *peer.Peer) {
@@ -93,25 +61,11 @@ func choke(t *testing.T, d *Download, p *peer.Peer) {
 	within(t, func() { d.onMessage(p, wire.BuildChoke()) })
 }
 
-// drainQueue returns every job currently in the queue.
-func drainQueue(d *Download) []*job {
-	var jobs []*job
-	for {
-		select {
-		case j := <-d.queue:
-			jobs = append(jobs, j)
-		default:
-			return jobs
-		}
-	}
-}
-
 func TestChokeDropsPendingRequests(t *testing.T) {
-	d := newQueueDownload(t, 16)
-	p := newInflightPeer(t, nil)
-	want := map[*job]bool{}
-	for i := range uint32(3) {
-		want[addPending(t, d, p, 0, i*config.BlockSize)] = true
+	d := newTestDownload(t, 2)
+	p := newInflightPeer(t, d, nil)
+	for range 3 {
+		addPending(t, d, p)
 	}
 
 	choke(t, d, p)
@@ -122,24 +76,18 @@ func TestChokeDropsPendingRequests(t *testing.T) {
 	if got := p.InflightRequests(); got != 0 {
 		t.Fatalf("expected a choke to release the peer's slots, %d held", got)
 	}
-	requeued := drainQueue(d)
-	if len(requeued) != len(want) {
-		t.Fatalf("expected %d jobs requeued, got %d", len(want), len(requeued))
-	}
-	for _, j := range requeued {
-		if !want[j] {
-			t.Fatalf("unexpected job requeued: %v", j)
-		}
-		delete(want, j)
+	other := newInflightPeer(t, d, nil)
+	for range 4 {
+		pickFor(t, d, other)
 	}
 }
 
 func TestChokeStopsDroppedRequestTimers(t *testing.T) {
-	d := newQueueDownload(t, 16)
-	p := newInflightPeer(t, nil)
-	addPending(t, d, p, 0, 0)
+	d := newTestDownload(t, 1)
+	p := newInflightPeer(t, d, nil)
+	key := addPending(t, d, p)
 	d.mu.Lock()
-	timer := d.pending[pendingKey(0, 0)].timer
+	timer := d.pending[key].timer
 	d.mu.Unlock()
 
 	choke(t, d, p)
@@ -150,13 +98,13 @@ func TestChokeStopsDroppedRequestTimers(t *testing.T) {
 }
 
 func TestRepeatedChokesWithPendingRequestsDoNotClosePeer(t *testing.T) {
-	d := newQueueDownload(t, 64)
-	p := newInflightPeer(t, nil)
+	d := newTestDownload(t, 2)
+	p := newInflightPeer(t, d, nil)
 
-	for round := range uint32(peerFailureLimit + 1) {
+	for range peerFailureLimit + 1 {
 		p.SetChoked(false)
-		for i := range uint32(3) {
-			addPending(t, d, p, round, i*config.BlockSize)
+		for range 3 {
+			addPending(t, d, p)
 		}
 		choke(t, d, p)
 	}
@@ -170,44 +118,40 @@ func TestRepeatedChokesWithPendingRequestsDoNotClosePeer(t *testing.T) {
 }
 
 func TestChokeOnlyDropsChokingPeerRequests(t *testing.T) {
-	d := newQueueDownload(t, 16)
-	a := newInflightPeer(t, nil)
-	b := newInflightPeer(t, nil)
-	addPending(t, d, a, 0, 0)
-	addPending(t, d, a, 0, config.BlockSize)
-	bJobs := []*job{
-		addPending(t, d, b, 1, 0),
-		addPending(t, d, b, 1, config.BlockSize),
-	}
+	d := newTestDownload(t, 2)
+	a := newInflightPeer(t, d, nil)
+	b := newInflightPeer(t, d, nil)
+	addPending(t, d, a)
+	addPending(t, d, a)
+	bKeys := []pendingKey{addPending(t, d, b), addPending(t, d, b)}
 
 	choke(t, d, a)
 
 	if got := b.InflightRequests(); got != 2 {
 		t.Fatalf("expected the other peer to keep its 2 slots, got %d", got)
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if len(d.pending) != 2 {
-		t.Fatalf("expected only the other peer's 2 requests to remain, got %d", len(d.pending))
+	if got := pendingCount(d); got != 2 {
+		t.Fatalf("expected only the other peer's 2 requests to remain, got %d", got)
 	}
-	for _, j := range bJobs {
-		pr, ok := d.pending[pendingKey(j.index, j.begin)]
-		if !ok || pr.peer != b {
-			t.Fatalf("expected the other peer's request %v to stay pending", j)
+	for _, key := range bKeys {
+		if !hasPending(d, key) {
+			t.Fatalf("expected the other peer's request %+v to stay pending", key)
 		}
 	}
 }
 
 func TestChokeDistinguishesPeersWithSameAddress(t *testing.T) {
-	d := newQueueDownload(t, 16)
+	d := newTestDownload(t, 1)
 	addr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 6881}
 	// e.g. a reconnect while the old connection still has requests pending.
 	old := peer.New(nil, addr, 1)
-	old.SetChoked(false)
 	current := peer.New(nil, addr, 1)
-	current.SetChoked(false)
-	addPending(t, d, old, 0, 0)
-	addPending(t, d, current, 0, config.BlockSize)
+	for _, p := range []*peer.Peer{old, current} {
+		p.SetChoked(false)
+		d.picker.SetBitfield(p, []bool{true})
+	}
+	addPending(t, d, old)
+	addPending(t, d, current)
 
 	choke(t, d, current)
 
@@ -223,20 +167,17 @@ func TestChokeDistinguishesPeersWithSameAddress(t *testing.T) {
 }
 
 func TestTimeoutAfterChokeIsIgnored(t *testing.T) {
-	d := newQueueDownload(t, 16)
-	p := newInflightPeer(t, nil)
-	j := addPending(t, d, p, 0, 0)
+	d := newTestDownload(t, 1)
+	p := newInflightPeer(t, d, nil)
+	key := addPending(t, d, p)
 
 	choke(t, d, p)
 	for range peerFailureLimit + 1 {
-		within(t, func() { d.onTimeout(pendingKey(j.index, j.begin), j) })
+		within(t, func() { d.onTimeout(key) })
 	}
 
 	if got := p.InflightRequests(); got != 0 {
 		t.Fatalf("expected no double release, %d slots held", got)
-	}
-	if got := len(drainQueue(d)); got != 1 {
-		t.Fatalf("expected the job to be requeued once, got %d", got)
 	}
 	if isClosed(p) {
 		t.Fatal("expected timeouts of dropped requests not to count as failures")
@@ -244,18 +185,15 @@ func TestTimeoutAfterChokeIsIgnored(t *testing.T) {
 }
 
 func TestChokeWithoutPendingRequestsIsNoop(t *testing.T) {
-	d := newQueueDownload(t, 16)
-	a := newInflightPeer(t, nil)
-	b := newInflightPeer(t, nil)
-	addPending(t, d, b, 0, 0)
+	d := newTestDownload(t, 1)
+	a := newInflightPeer(t, d, nil)
+	b := newInflightPeer(t, d, nil)
+	addPending(t, d, b)
 
 	choke(t, d, a)
 	choke(t, d, a)
 
 	if got := pendingCount(d); got != 1 {
 		t.Fatalf("expected the other peer's request to stay pending, got %d", got)
-	}
-	if got := len(d.queue); got != 0 {
-		t.Fatalf("expected nothing requeued, got %d jobs", got)
 	}
 }

@@ -13,7 +13,7 @@ import (
 
 	"github.com/nazifbara/ziftorrent/internal/config"
 	"github.com/nazifbara/ziftorrent/internal/peer"
-	"github.com/nazifbara/ziftorrent/internal/piece"
+	"github.com/nazifbara/ziftorrent/internal/picker"
 	"github.com/nazifbara/ziftorrent/internal/torrent"
 	"github.com/nazifbara/ziftorrent/internal/tracker"
 	"github.com/nazifbara/ziftorrent/internal/utils"
@@ -38,10 +38,9 @@ type fileState struct {
 type Download struct {
 	mu                  sync.Mutex
 	torrent             *torrent.Torrent
-	queue               chan *job
 	addrQueue           chan *net.TCPAddr
-	pending             map[string]*pendingRequest
-	pieces              []*piece.State
+	pending             map[pendingKey]*pendingRequest
+	picker              *picker.Picker
 	startedAt           time.Time
 	totalDownloaded     atomic.Int64
 	done                chan struct{}
@@ -62,19 +61,10 @@ func New(t *torrent.Torrent, c *config.Config) *Download {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	pieces := make([]*piece.State, t.NumOfPieces)
-	for i := range pieces {
-		size := t.PieceSize
-		if i == len(pieces)-1 {
-			size = t.FinalPieceSize
-		}
-		pieces[i] = piece.New(size, c.BlockSize)
-	}
 	return &Download{
 		torrent:             t,
-		pieces:              pieces,
-		queue:               make(chan *job, t.NumOfBlocks),
-		pending:             make(map[string]*pendingRequest),
+		picker:              picker.New(int(t.NumOfPieces), int(t.PieceSize), int(t.FinalPieceSize), c.BlockSize),
+		pending:             make(map[pendingKey]*pendingRequest),
 		ctx:                 ctx,
 		cancel:              cancel,
 		files:               make([]*fileState, len(t.Files)),
@@ -160,27 +150,11 @@ func (d *Download) download() error {
 	for _, address := range addresses {
 		d.addrQueue <- address
 	}
-	progress := d.config.GetProgressRanges()
-	if len(progress) == 0 {
-		for i := range d.pieces {
-			d.addPieceJob(uint32(i))
-		}
-	} else if len(progress) == 1 && progress[0].End == int64(d.torrent.ContentSize) {
-		fmt.Printf("⚠️ Download already complete")
+	resumed := d.picker.SyncWithProgress(d.config.GetProgressRanges(), int(d.torrent.PieceSize))
+	d.totalDownloaded.Add(int64(resumed))
+	if d.picker.Complete() {
+		fmt.Println("⚠️ Download already complete")
 		return nil
-	} else {
-		for i := range progress {
-			d.totalDownloaded.Add(int64(progress[i].End - progress[i].Start))
-			gapStart := progress[i].End
-			startPieceIndex := utils.FindIndexByOffset(gapStart, d.torrent.PieceSize)
-			if i != len(progress)-1 {
-				gapEnd := progress[i+1].Start
-				endPieceIndex := utils.FindIndexByOffset(gapEnd, d.torrent.PieceSize)
-				d.addPieceJobsBetween(startPieceIndex, endPieceIndex, uint64(gapStart), uint64(gapEnd))
-			} else if gapStart != int64(d.torrent.ContentSize) {
-				d.addPieceJobsBetween(startPieceIndex, uint32(d.torrent.NumOfPieces-1), uint64(gapStart), 0)
-			}
-		}
 	}
 
 	saveTicker := time.NewTicker(time.Second)

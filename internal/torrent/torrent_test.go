@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	bencode "github.com/jackpal/bencode-go"
-	"github.com/nazifbara/ziftorrent/internal/config"
 )
 
 func repeatHash(b byte) [20]byte {
@@ -204,29 +203,5 @@ func TestOpenTorrentReturnsToTorrentError(t *testing.T) {
 	_, err = Open(path)
 	if err == nil {
 		t.Fatal("expected malformed pieces error")
-	}
-}
-
-func TestBlockLength(t *testing.T) {
-	tor := Torrent{NumOfPieces: 5, PieceSize: 32768, FinalPieceSize: 20000}
-	cases := []struct {
-		name         string
-		piece, begin uint32
-		want         uint32
-	}{
-		{"full block in regular piece", 0, 0, config.BlockSize},
-		{"tail of regular piece", 0, 32768 - 100, 100},
-		{"start of final piece", 4, 0, config.BlockSize},
-		{"tail of final piece", 4, 20000 - 500, 500},
-	}
-	for _, tc := range cases {
-		if got := tor.BlockLength(tc.piece, tc.begin); got != tc.want {
-			t.Errorf("%s: got %d, want %d", tc.name, got, tc.want)
-		}
-	}
-
-	short := Torrent{NumOfPieces: 5, PieceSize: 32768, FinalPieceSize: 5000}
-	if got := short.BlockLength(4, 0); got != 5000 {
-		t.Errorf("final piece shorter than a block: got %d, want 5000", got)
 	}
 }
